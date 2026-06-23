@@ -3,7 +3,7 @@
 // the token and signalling a re-login). Base URL is '' = same origin (the broker can
 // embed and serve this console at /ui/); the dev server proxies the RPC paths.
 
-import { getToken, clearToken, setToken } from './auth'
+import { getToken, clearToken, setToken, getEndpoint } from './auth'
 import type {
   Discovery,
   FilterTest,
@@ -15,7 +15,11 @@ import type {
   WireMessage,
 } from './types'
 
-const BASE = (import.meta.env.VITE_MQLITE_URL as string | undefined) ?? ''
+// Target broker base URL: the stored endpoint (standalone connector → any broker), else a
+// build-time default, else '' = same origin (embedded: the broker serves us at /ui/).
+function base(): string {
+  return getEndpoint() || (import.meta.env.VITE_MQLITE_URL as string | undefined) || ''
+}
 
 export class ApiError extends Error {
   constructor(
@@ -37,7 +41,7 @@ export function onUnauthorized(fn: Listener): () => void {
 
 async function rpc<T>(path: string, body?: unknown, token?: string): Promise<T> {
   const tok = token ?? getToken()
-  const res = await fetch(BASE + path, {
+  const res = await fetch(base() + path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -91,7 +95,7 @@ export function bodySize(b64?: string): number {
 // ── open endpoint: broker discovery (no auth) ──────────────────────────────────
 export async function discovery(): Promise<Discovery | null> {
   try {
-    const res = await fetch(BASE + '/', { headers: { Accept: 'application/json' } })
+    const res = await fetch(base() + '/', { headers: { Accept: 'application/json' } })
     if (!res.ok) return null
     if (!(res.headers.get('content-type') ?? '').includes('json')) return null
     return (await res.json()) as Discovery

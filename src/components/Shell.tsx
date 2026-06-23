@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { discovery } from '../lib/api'
 import type { Discovery } from '../lib/types'
 import { cn } from '../lib/cn'
+import { Logo } from './Logo'
 import { TimeFormatToggle } from './Time'
 import { Overview } from '../views/Overview'
 import { Queues } from '../views/Queues'
@@ -86,16 +87,6 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           <Metrics onOpenQueue={openQueue} onOpenSub={openSub} />
         )}
       </main>
-    </div>
-  )
-}
-
-// Two-tone wordmark: white "mq" against black, then "lite" black-on-orange box.
-function Logo() {
-  return (
-    <div className="flex select-none items-center" title="mqlite console">
-      <span className="text-[17px] font-bold tracking-tight text-foreground">mq</span>
-      <span className="rounded-md bg-accent px-1 text-[17px] font-bold tracking-tight text-accent-foreground">lite</span>
     </div>
   )
 }

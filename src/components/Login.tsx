@@ -1,16 +1,25 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, discovery, login } from '../lib/api'
+import { getEndpoint, setEndpoint } from '../lib/auth'
 import type { Discovery } from '../lib/types'
-import { Button, ErrorBanner, Input } from './ui'
+import { Button, ErrorBanner, Input, Label } from './ui'
+import { Logo } from './Logo'
 
 export function Login({ onAuthed }: { onAuthed: () => void }) {
+  const [endpoint, setEp] = useState(getEndpoint())
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [info, setInfo] = useState<Discovery | null>(null)
 
+  // probe whichever broker the endpoint points at (blank = same origin).
+  function probe() {
+    setEndpoint(endpoint)
+    discovery().then(setInfo)
+  }
   useEffect(() => {
     discovery().then(setInfo)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function submit(e: FormEvent) {
@@ -19,6 +28,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
     if (!t || busy) return
     setBusy(true)
     setErr('')
+    setEndpoint(endpoint) // target this broker before we authenticate
     try {
       await login(t)
       onAuthed()
@@ -30,7 +40,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
   }
 
   return (
-    <div className="grid-backdrop relative min-h-screen flex items-center justify-center overflow-hidden p-4">
+    <div className="grid-backdrop relative flex min-h-screen items-center justify-center overflow-hidden p-4">
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div
           className="h-[440px] w-[440px] rounded-full"
@@ -43,31 +53,39 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
         className="relative w-full max-w-sm rounded-xl bg-surface p-6 ring-1 ring-border shadow-[0_0_70px_-24px] shadow-accent/40"
       >
         <div className="flex items-center gap-2">
-          <div className="flex select-none items-center">
-            <span className="text-xl font-bold tracking-tight text-foreground">mq</span>
-            <span className="rounded-md bg-accent px-1 text-xl font-bold tracking-tight text-accent-foreground">lite</span>
-          </div>
+          <Logo markSize={28} text={20} />
           <span className="text-xs text-muted-foreground">console</span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           {info
             ? `${info.name ?? 'broker'}${info.version ? ` ${info.version}` : ''} · ${info.status ?? 'online'}`
-            : 'connect to a broker'}
+            : 'connect to any mqlite broker'}
         </p>
 
-        <div className="mt-6">
-          <div className="mb-1.5 text-xs text-muted-foreground">
-            auth <span className="text-faint">▸</span> paste a broker token
+        <div className="mt-6 space-y-4">
+          <div>
+            <Label>broker URL</Label>
+            <Input
+              value={endpoint}
+              onChange={(e) => setEp(e.target.value)}
+              onBlur={probe}
+              placeholder={window.location.origin + '  (blank = this origin)'}
+              spellCheck={false}
+              autoComplete="off"
+            />
           </div>
-          <Input
-            type="password"
-            autoFocus
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="mqk_…"
-            spellCheck={false}
-            autoComplete="off"
-          />
+          <div>
+            <Label>token</Label>
+            <Input
+              type="password"
+              autoFocus
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="mqk_…"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </div>
         </div>
 
         {err && (
@@ -81,12 +99,13 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
         </Button>
 
         <p className="mt-4 text-[11px] leading-relaxed text-faint">
-          the token is one of the broker's <span className="text-muted-foreground">MQLITE_TOKENS</span>. it stays in
-          this tab only.
+          point it at any broker and authenticate with one of its{' '}
+          <span className="text-muted-foreground">MQLITE_TOKENS</span>. the URL is remembered; the token stays in this
+          tab only.
         </p>
       </form>
 
-      <div className="absolute bottom-4 text-[11px] text-faint cursor-blink">mqlite console</div>
+      <div className="absolute bottom-4 cursor-blink text-[11px] text-faint">mqlite console</div>
     </div>
   )
 }
