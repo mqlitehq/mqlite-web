@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
 import { discovery } from '../lib/api'
 import type { Discovery } from '../lib/types'
 import { cn } from '../lib/cn'
@@ -10,7 +10,11 @@ import { Topics } from '../views/Topics'
 import { Metrics } from '../views/Metrics'
 import { Detail } from '../views/Detail'
 
-export type View = 'overview' | 'queues' | 'topics' | 'metrics'
+// docs pull in a markdown renderer + the bundled markdown — lazy so they don't weigh down
+// the main bundle (loaded only when the docs tab is opened).
+const Docs = lazy(() => import('../views/Docs').then((m) => ({ default: m.Docs })))
+
+export type View = 'overview' | 'queues' | 'topics' | 'metrics' | 'docs'
 export interface DetailTarget {
   kind: 'queue' | 'subscription'
   name: string
@@ -22,6 +26,7 @@ const NAV: { id: View; label: string }[] = [
   { id: 'queues', label: 'queues' },
   { id: 'topics', label: 'topics' },
   { id: 'metrics', label: 'metrics' },
+  { id: 'docs', label: 'docs' },
 ]
 
 export function Shell({ onSignOut }: { onSignOut: () => void }) {
@@ -83,8 +88,12 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           <Queues onOpen={openQueue} />
         ) : view === 'topics' ? (
           <Topics onOpenSub={openSub} />
-        ) : (
+        ) : view === 'metrics' ? (
           <Metrics onOpenQueue={openQueue} onOpenSub={openSub} />
+        ) : (
+          <Suspense fallback={<div className="text-sm text-muted-foreground">loading docs…</div>}>
+            <Docs />
+          </Suspense>
         )}
       </main>
     </div>
