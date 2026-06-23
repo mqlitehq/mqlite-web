@@ -153,7 +153,10 @@ export function testFilter(expr: string, sample?: FilterSample): Promise<FilterT
   }
   return rpc<FilterTest>('/mqlite.v1.AdminService/TestFilter', { expr, ...(message ? { message } : {}) })
 }
-export async function redrive(queue: string, opts: { target?: string; max?: number; older_than_ms?: number } = {}): Promise<number> {
+export async function redrive(
+  queue: string,
+  opts: { target?: string; max?: number; older_than_ms?: number; rate_per_sec?: number } = {},
+): Promise<number> {
   const r = await rpc<{ moved?: number }>('/mqlite.v1.AdminService/Redrive', { queue, ...opts })
   return r.moved ?? 0
 }

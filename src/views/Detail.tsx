@@ -1,15 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import {
-  bodySize,
-  cancel,
-  decodeBody,
-  listSubscriptions,
-  peek,
-  purge,
-  redrive,
-  stats,
-  subscribe,
-} from '../lib/api'
+import { bodySize, cancel, decodeBody, listSubscriptions, peek, stats, subscribe } from '../lib/api'
 import type { DetailTarget } from '../components/Shell'
 import type { Metrics, MessageState, WireMessage } from '../lib/types'
 import {
@@ -27,6 +17,7 @@ import {
 import { FilterEditor } from '../components/FilterEditor'
 import { PublishPanel, SendPanel } from '../components/Composer'
 import { Receiver } from '../components/Receiver'
+import { DLQActions } from '../components/DLQActions'
 import { DeferredSettle } from '../components/DeferredSettle'
 import { MessageDetail } from '../components/MessageDetail'
 import { Time } from '../components/Time'
@@ -262,26 +253,6 @@ export function Detail({
           </button>
         ))}
         <div className="ml-auto flex items-center gap-2 pr-1">
-          {tab === 'dead_lettered' && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy || !m?.dead_lettered}
-                onClick={() => act(async () => `redrove ${await redrive(name)} message(s)`)}
-              >
-                redrive all
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={busy || !m?.dead_lettered}
-                onClick={() => act(async () => `purged ${await purge(name)} message(s)`)}
-              >
-                purge
-              </Button>
-            </>
-          )}
           {tab === 'active' && (
             <Button variant="outline" size="sm" disabled={busy || !m?.active} onClick={() => setShowRecv((v) => !v)}>
               receive
@@ -289,6 +260,8 @@ export function Detail({
           )}
         </div>
       </div>
+
+      {tab === 'dead_lettered' && <DLQActions queue={name} busy={busy} run={act} />}
 
       {note && <p className="mt-3 text-xs text-ok">✓ {note}</p>}
       {err && (
