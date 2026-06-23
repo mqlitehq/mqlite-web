@@ -5,6 +5,7 @@
 
 import { getToken, clearToken, setToken, getEndpoint } from './auth'
 import type {
+  BrokerStatus,
   Discovery,
   FilterTest,
   MessageState,
@@ -124,6 +125,10 @@ export function subscribe(topic: string, name: string, expr?: string): Promise<u
     name,
     ...(expr ? { filter: { expr } } : {}),
   })
+}
+// Desensitized runtime snapshot (backend, redacted location, latency, footprint, …).
+export function status(): Promise<BrokerStatus> {
+  return rpc<BrokerStatus>('/mqlite.v1.AdminService/Status', {})
 }
 // Every subscription with its topic + filter expression — what ListQueues omits.
 export async function listSubscriptions(): Promise<Subscription[]> {

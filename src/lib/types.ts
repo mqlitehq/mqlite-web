@@ -76,3 +76,17 @@ export interface FilterTest {
   ran: boolean
   matched: boolean
 }
+
+export interface BrokerStatus {
+  version: string
+  backend: string // memory | local file | remote libSQL/Turso
+  remote: boolean
+  location: string // local path, or masked remote host
+  schema_version: string
+  ping_ms: number // -1 if the read failed
+  db_size_bytes: number // 0 for memory/remote
+  queues: number
+  subscriptions: number
+  uptime_ms: number
+  auth: boolean
+}

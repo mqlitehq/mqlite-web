@@ -1,6 +1,7 @@
 import { useTopology } from '../lib/useTopology'
 import type { View } from '../components/Shell'
 import { Badge, Button, Card, ErrorBanner, PageHeader, Spinner, Stat, StatStrip } from '../components/ui'
+import { SystemPanel } from '../components/SystemPanel'
 import { fmtNum } from '../lib/format'
 
 export function Overview({
@@ -49,6 +50,8 @@ export function Overview({
           </Button>
         }
       />
+
+      <SystemPanel />
 
       {err && <ErrorBanner message={err} />}
       {loading ? (
