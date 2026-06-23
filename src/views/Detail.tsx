@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   bodySize,
+  cancel,
   complete,
   decodeBody,
   listSubscriptions,
@@ -355,6 +356,25 @@ export function Detail({
                       <tr className="border-b border-border/60">
                         <td colSpan={cols} className="p-0">
                           <MessageDetail m={msg} />
+                          {msg.state === 'scheduled' && msg.seq_number != null && (
+                            <div className="flex items-center gap-3 border-t border-border bg-surface-2/40 px-4 py-2">
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() =>
+                                  act(async () => {
+                                    await cancel(name, msg.seq_number!)
+                                    setOpenSeq(null)
+                                    return `cancelled scheduled seq ${msg.seq_number}`
+                                  })
+                                }
+                              >
+                                cancel — delete this scheduled message
+                              </Button>
+                              <span className="text-[11px] text-faint">removes it before it ever activates</span>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}

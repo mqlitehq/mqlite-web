@@ -137,7 +137,7 @@ function NewSubscription({
   onClose: () => void
   onDone: () => void
 }) {
-  const [topic, setTopic] = useState(topics[0] ?? 'events')
+  const [topic, setTopic] = useState('')
   const [name, setName] = useState('')
   const [expr, setExpr] = useState('')
   const [busy, setBusy] = useState(false)

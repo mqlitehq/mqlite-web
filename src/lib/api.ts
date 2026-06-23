@@ -166,15 +166,26 @@ export async function purge(queue: string, opts: { max?: number; older_than_ms?:
 export function stats(queue: string): Promise<Metrics> {
   return rpc<Metrics>('/mqlite.v1.QueueService/Stats', { queue })
 }
-export async function send(queue: string, msg: Partial<WireMessage> & { bodyText?: string }): Promise<number[]> {
-  const { bodyText, ...rest } = msg
+export async function send(
+  queue: string,
+  msg: Partial<WireMessage> & { bodyText?: string; ttlMs?: number; scheduledEnqueueTimeMs?: number },
+): Promise<number[]> {
+  const { bodyText, ttlMs, scheduledEnqueueTimeMs, ...rest } = msg
   const wire: WireMessage = { ...rest }
   if (bodyText !== undefined) wire.body = encodeBody(bodyText)
   const r = await rpc<{ seq_numbers?: number[] }>('/mqlite.v1.QueueService/Send', {
     queue,
     messages: [wire],
+    ...(ttlMs && ttlMs > 0 ? { ttl_ms: ttlMs } : {}), // SendRequest.ttl_ms applies to the batch
+    ...(scheduledEnqueueTimeMs && scheduledEnqueueTimeMs > 0
+      ? { scheduled_enqueue_time_ms: scheduledEnqueueTimeMs } // schedules the message (→ scheduled state)
+      : {}),
   })
   return r.seq_numbers ?? []
+}
+// Delete a not-yet-activated scheduled message by seq (the one clean single-message op).
+export function cancel(queue: string, seq: number): Promise<unknown> {
+  return rpc('/mqlite.v1.QueueService/Cancel', { queue, seq_number: seq })
 }
 export async function peek(queue: string, state: MessageState | '', max = 50): Promise<WireMessage[]> {
   const r = await rpc<{ messages?: WireMessage[] }>('/mqlite.v1.QueueService/Peek', {
