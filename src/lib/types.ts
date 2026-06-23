@@ -33,6 +33,7 @@ export interface WireMessage {
   properties?: Record<string, string>
   delivery_count?: number
   enqueued_at_ms?: number
+  expires_at_ms?: number
   visible_at_ms?: number
   locked_until_ms?: number
   lock_token?: string

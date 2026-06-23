@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   bodySize,
   complete,
@@ -27,6 +27,7 @@ import {
 } from '../components/ui'
 import { FilterEditor } from '../components/FilterEditor'
 import { PublishPanel, SendPanel } from '../components/Composer'
+import { MessageDetail } from '../components/MessageDetail'
 import { Time } from '../components/Time'
 import { fmtBytes } from '../lib/format'
 
@@ -52,6 +53,7 @@ export function Detail({
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
   const [msgs, setMsgs] = useState<WireMessage[] | null>(null)
+  const [openSeq, setOpenSeq] = useState<number | null>(null)
   const [err, setErr] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -309,39 +311,56 @@ export function Detail({
               </tr>
             </thead>
             <tbody>
-              {msgs.map((msg) => (
-                <tr key={msg.seq_number} className="border-b border-border/60 align-top last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{msg.seq_number}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
-                    <Time ms={msg.enqueued_at_ms} />
-                  </td>
-                  <td className="px-3 py-2 text-center tabular-nums">
-                    {msg.delivery_count ? <span className="text-warn">{msg.delivery_count}</span> : <span className="text-faint">0</span>}
-                  </td>
-                  <td className="max-w-[260px] px-3 py-2">
-                    <div className="truncate font-mono text-xs text-foreground/90">
-                      {decodeBody(msg.body) || <span className="text-faint">—</span>}
-                    </div>
-                    <div className="text-[10px] text-faint">{fmtBytes(bodySize(msg.body))}</div>
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {msg.subject && <div className="text-foreground/80">{msg.subject}</div>}
-                    {msg.message_id && <div className="text-faint">{msg.message_id}</div>}
-                    {msg.group_id && (
-                      <Badge tone="outline" className="mt-0.5 h-4 px-1.5 text-[10px]">
-                        {msg.group_id}
-                      </Badge>
+              {msgs.map((msg) => {
+                const open = openSeq === msg.seq_number
+                const cols = tab === 'dead_lettered' ? 6 : 5
+                return (
+                  <Fragment key={msg.seq_number}>
+                    <tr
+                      onClick={() => setOpenSeq(open ? null : (msg.seq_number ?? null))}
+                      className="cursor-pointer border-b border-border/60 align-top last:border-0 hover:bg-muted/30"
+                    >
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                        <span className="mr-1 text-faint">{open ? '▾' : '▸'}</span>
+                        {msg.seq_number}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+                        <Time ms={msg.enqueued_at_ms} />
+                      </td>
+                      <td className="px-3 py-2 text-center tabular-nums">
+                        {msg.delivery_count ? <span className="text-warn">{msg.delivery_count}</span> : <span className="text-faint">0</span>}
+                      </td>
+                      <td className="max-w-[260px] px-3 py-2">
+                        <div className="truncate font-mono text-xs text-foreground/90">
+                          {decodeBody(msg.body) || <span className="text-faint">—</span>}
+                        </div>
+                        <div className="text-[10px] text-faint">{fmtBytes(bodySize(msg.body))}</div>
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {msg.subject && <div className="text-foreground/80">{msg.subject}</div>}
+                        {msg.message_id && <div className="text-faint">{msg.message_id}</div>}
+                        {msg.properties && Object.keys(msg.properties).length > 0 && (
+                          <div className="text-faint">{Object.keys(msg.properties).length} props</div>
+                        )}
+                        {!msg.subject && !msg.message_id && !msg.group_id && <span className="text-faint">—</span>}
+                      </td>
+                      {tab === 'dead_lettered' && (
+                        <td className="px-3 py-2 text-xs text-danger/90">
+                          {msg.dead_letter_reason ?? '—'}
+                          {msg.dead_letter_description && <div className="text-faint">{msg.dead_letter_description}</div>}
+                        </td>
+                      )}
+                    </tr>
+                    {open && (
+                      <tr className="border-b border-border/60">
+                        <td colSpan={cols} className="p-0">
+                          <MessageDetail m={msg} />
+                        </td>
+                      </tr>
                     )}
-                    {!msg.subject && !msg.message_id && !msg.group_id && <span className="text-faint">—</span>}
-                  </td>
-                  {tab === 'dead_lettered' && (
-                    <td className="px-3 py-2 text-xs text-danger/90">
-                      {msg.dead_letter_reason ?? '—'}
-                      {msg.dead_letter_description && <div className="text-faint">{msg.dead_letter_description}</div>}
-                    </td>
-                  )}
-                </tr>
-              ))}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </Card>
