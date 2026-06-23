@@ -1,9 +1,39 @@
 import { useState, type ReactNode } from 'react'
 import { createQueue } from '../lib/api'
+import type { QueueConfig } from '../lib/types'
 import { useTopology } from '../lib/useTopology'
 import { Badge, Button, Card, Empty, ErrorBanner, Input, Label, PageHeader, Select, Spinner } from '../components/ui'
 import { Time } from '../components/Time'
 import { fmtNum } from '../lib/format'
+
+const TIME_UNITS = [
+  { label: 'seconds', ms: 1000 },
+  { label: 'minutes', ms: 60_000 },
+  { label: 'hours', ms: 3_600_000 },
+  { label: 'days', ms: 86_400_000 },
+]
+const BYTE_UNITS = [
+  { label: 'KB', mul: 1024 },
+  { label: 'MB', mul: 1_048_576 },
+  { label: 'GB', mul: 1_073_741_824 },
+]
+const ms = (n: string, unit: string) => (Number(n) > 0 ? Number(n) * Number(unit) : 0)
+
+// number + unit-select → a duration in ms (0 when blank).
+function DurField({ n, setN, u, setU }: { n: string; setN: (v: string) => void; u: string; setU: (v: string) => void }) {
+  return (
+    <div className="flex gap-2">
+      <Input type="number" min="0" className="w-24" value={n} onChange={(e) => setN(e.target.value)} placeholder="0" />
+      <Select value={u} onChange={(e) => setU(e.target.value)} className="flex-1">
+        {TIME_UNITS.map((x) => (
+          <option key={x.ms} value={x.ms}>
+            {x.label}
+          </option>
+        ))}
+      </Select>
+    </div>
+  )
+}
 
 export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
   const { queues, metrics, loading, err, reload } = useTopology()
@@ -114,10 +144,25 @@ function Num({ v, tone, bold }: { v?: number; tone?: 'warn' | 'danger'; bold?: b
   )
 }
 
+// Every QueueConfig field the API accepts (Web↔API parity). Blank duration/count = inherit
+// the broker default; the field is only sent when set.
 function CreateQueueForm({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [name, setName] = useState('')
   const [ordering, setOrdering] = useState('standard')
   const [maxDelivery, setMaxDelivery] = useState('10')
+  const [lockN, setLockN] = useState('30')
+  const [lockU, setLockU] = useState(String(1000))
+  const [ttlN, setTtlN] = useState('')
+  const [ttlU, setTtlU] = useState(String(3_600_000))
+  const [dle, setDle] = useState('default') // dead-letter on expire: default | dlq | discard
+  const [dedupN, setDedupN] = useState('')
+  const [dedupU, setDedupU] = useState(String(60_000))
+  const [more, setMore] = useState(false)
+  const [ageN, setAgeN] = useState('')
+  const [ageU, setAgeU] = useState(String(86_400_000))
+  const [maxCount, setMaxCount] = useState('')
+  const [bytesN, setBytesN] = useState('')
+  const [bytesU, setBytesU] = useState(String(1_048_576))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -125,8 +170,18 @@ function CreateQueueForm({ onClose, onDone }: { onClose: () => void; onDone: () 
     if (!name.trim() || busy) return
     setBusy(true)
     setErr('')
+    const cfg: QueueConfig = { ordering_mode: ordering }
+    if (Number(maxDelivery) > 0) cfg.max_delivery_count = Number(maxDelivery)
+    if (ms(lockN, lockU) > 0) cfg.lock_duration_ms = ms(lockN, lockU)
+    if (ms(ttlN, ttlU) > 0) cfg.default_ttl_ms = ms(ttlN, ttlU)
+    if (ms(dedupN, dedupU) > 0) cfg.dedup_window_ms = ms(dedupN, dedupU)
+    if (dle === 'dlq') cfg.dead_letter_on_expire = true
+    else if (dle === 'discard') cfg.dead_letter_on_expire = false
+    if (ms(ageN, ageU) > 0) cfg.dlq_max_age_ms = ms(ageN, ageU)
+    if (Number(maxCount) > 0) cfg.dlq_max_count = Number(maxCount)
+    if (Number(bytesN) > 0) cfg.dlq_max_bytes = Number(bytesN) * Number(bytesU)
     try {
-      await createQueue(name.trim(), { ordering_mode: ordering, max_delivery_count: Number(maxDelivery) || 0 })
+      await createQueue(name.trim(), cfg)
       onDone()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'create failed')
@@ -143,6 +198,7 @@ function CreateQueueForm({ onClose, onDone }: { onClose: () => void; onDone: () 
           close ✕
         </button>
       </div>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <Label>name</Label>
@@ -157,10 +213,66 @@ function CreateQueueForm({ onClose, onDone }: { onClose: () => void; onDone: () 
           </Select>
         </div>
         <div>
-          <Label>max delivery</Label>
-          <Input type="number" value={maxDelivery} onChange={(e) => setMaxDelivery(e.target.value)} />
+          <Label>max delivery count</Label>
+          <Input type="number" min="0" value={maxDelivery} onChange={(e) => setMaxDelivery(e.target.value)} />
         </div>
       </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <Label>lock duration</Label>
+          <DurField n={lockN} setN={setLockN} u={lockU} setU={setLockU} />
+        </div>
+        <div>
+          <Label>dedup window (blank = off)</Label>
+          <DurField n={dedupN} setN={setDedupN} u={dedupU} setU={setDedupU} />
+        </div>
+        <div>
+          <Label>default TTL (blank = none)</Label>
+          <DurField n={ttlN} setN={setTtlN} u={ttlU} setU={setTtlU} />
+        </div>
+        <div>
+          <Label>on TTL expiry</Label>
+          <Select value={dle} onChange={(e) => setDle(e.target.value)}>
+            <option value="default">broker default</option>
+            <option value="dlq">dead-letter</option>
+            <option value="discard">discard</option>
+          </Select>
+        </div>
+      </div>
+
+      <button
+        onClick={() => setMore((v) => !v)}
+        className="mt-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {more ? '▾' : '▸'} DLQ retention overrides (per-queue) — blank inherits the broker default
+      </button>
+      {more && (
+        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <Label>max age</Label>
+            <DurField n={ageN} setN={setAgeN} u={ageU} setU={setAgeU} />
+          </div>
+          <div>
+            <Label>max count</Label>
+            <Input type="number" min="0" value={maxCount} onChange={(e) => setMaxCount(e.target.value)} placeholder="0" />
+          </div>
+          <div>
+            <Label>max bytes</Label>
+            <div className="flex gap-2">
+              <Input type="number" min="0" className="w-24" value={bytesN} onChange={(e) => setBytesN(e.target.value)} placeholder="0" />
+              <Select value={bytesU} onChange={(e) => setBytesU(e.target.value)} className="flex-1">
+                {BYTE_UNITS.map((b) => (
+                  <option key={b.mul} value={b.mul}>
+                    {b.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        </div>
+      )}
+
       {err && (
         <div className="mt-3">
           <ErrorBanner message={err} />

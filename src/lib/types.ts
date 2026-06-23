@@ -49,6 +49,10 @@ export interface QueueConfig {
   dead_letter_on_expire?: boolean
   dedup_window_ms?: number
   ordering_mode?: string
+  // per-queue DLQ retention overrides (0 = inherit broker default, -1 = unbounded)
+  dlq_max_age_ms?: number
+  dlq_max_count?: number
+  dlq_max_bytes?: number
 }
 
 export interface Discovery {
