@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { testFilter, type FilterSample } from '../lib/api'
 import type { FilterTest } from '../lib/types'
 import { Badge, Button, Input, Label, Textarea } from './ui'
+import { FilterReference } from './FilterReference'
 import { cn } from '../lib/cn'
 
 // The online filter editor. An expr-lang predicate is validated *as you type* (the broker
@@ -23,6 +24,8 @@ export function FilterEditor({
   // live compile check (debounced), with no sample → {valid, error}.
   const [check, setCheck] = useState<FilterTest | null>(null)
   const [checking, setChecking] = useState(false)
+  const [showRef, setShowRef] = useState(false)
+  const insert = (snippet: string) => onChange(expr.trim() ? `${expr} && ${snippet}` : snippet)
   useEffect(() => {
     if (!expr.trim()) {
       setCheck({ valid: true, ran: false, matched: false })
@@ -65,7 +68,16 @@ export function FilterEditor({
         )}
       </div>
 
-      <Cheatsheet onInsert={(snippet) => onChange(expr ? `${expr} && ${snippet}` : snippet)} />
+      <div className="text-xs">
+        <button
+          onClick={() => setShowRef(true)}
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          ▸ expression reference{' '}
+          <span className="text-faint">— variables, type conversion, examples</span>
+        </button>
+      </div>
+      {showRef && <FilterReference onInsert={insert} onClose={() => setShowRef(false)} />}
 
       <SampleTester expr={expr} canRun={valid !== false} />
 
@@ -197,37 +209,3 @@ function ResultBadge({ r }: { r: FilterTest }) {
   return r.matched ? <Badge tone="ok">✓ would route</Badge> : <Badge tone="warn">✕ filtered out</Badge>
 }
 
-// A compact reference of the message environment, click to insert.
-const SNIPPETS: { label: string; snippet: string }[] = [
-  { label: 'subject', snippet: 'subject == "orders.created"' },
-  { label: 'subject prefix', snippet: 'subject startsWith "orders."' },
-  { label: 'subject part', snippet: 'subject_parts[0] == "orders"' },
-  { label: 'property', snippet: 'properties["tier"] == "gold"' },
-  { label: 'has property', snippet: '"tier" in properties' },
-  { label: 'body field', snippet: 'body_json.amount > 100' },
-  { label: 'body text', snippet: 'body_text contains "urgent"' },
-]
-function Cheatsheet({ onInsert }: { onInsert: (snippet: string) => void }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="text-xs">
-      <button onClick={() => setOpen((v) => !v)} className="text-muted-foreground transition-colors hover:text-foreground">
-        {open ? '▾' : '▸'} expression reference
-      </button>
-      {open && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {SNIPPETS.map((s) => (
-            <button
-              key={s.label}
-              onClick={() => onInsert(s.snippet)}
-              title={s.snippet}
-              className="rounded-md border border-border-strong px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-accent hover:text-foreground"
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
