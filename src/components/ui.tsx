@@ -94,3 +94,84 @@ export function ErrorBanner({ message }: { message: string }) {
     </div>
   )
 }
+
+// ── page scaffolding ──────────────────────────────────────────────────────────
+export function PageHeader({
+  title,
+  subtitle,
+  icon,
+  actions,
+}: {
+  title: ReactNode
+  subtitle?: ReactNode
+  icon?: ReactNode
+  actions?: ReactNode
+}) {
+  return (
+    <header className="flex items-end justify-between gap-4">
+      <div className="min-w-0">
+        <h1 className="flex items-center gap-2 truncate text-2xl font-semibold tracking-tight">
+          {icon}
+          {title}
+        </h1>
+        {subtitle !== undefined && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+    </header>
+  )
+}
+
+// A labelled row of stats — the label makes the *level* explicit (topology counts vs
+// message counts are different things and must never read as one flat strip).
+export function StatStrip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">{label}</div>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{children}</div>
+    </div>
+  )
+}
+
+export function Stat({
+  label,
+  v,
+  state,
+  tone,
+  onClick,
+}: {
+  label: string
+  v?: number | string
+  state?: string
+  tone?: 'danger' | 'warn'
+  onClick?: () => void
+}) {
+  const color = tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-warn' : 'text-foreground'
+  return (
+    <Card
+      onClick={onClick}
+      className={cn('px-3 py-2.5', onClick && 'cursor-pointer transition-colors hover:bg-muted/40')}
+    >
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {state && <Dot state={state} />}
+        {label}
+      </div>
+      <div className={cn('mt-0.5 text-xl font-semibold tabular-nums', color)}>{v ?? '·'}</div>
+    </Card>
+  )
+}
+
+// A filter expression rendered as code — or a clear "match all" when empty.
+export function FilterCode({ expr, className }: { expr: string; className?: string }) {
+  if (!expr)
+    return <span className={cn('text-xs italic text-faint', className)}>match all messages</span>
+  return (
+    <code
+      className={cn(
+        'rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground/90 break-all',
+        className,
+      )}
+    >
+      {expr}
+    </code>
+  )
+}

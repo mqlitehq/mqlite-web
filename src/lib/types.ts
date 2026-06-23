@@ -63,3 +63,16 @@ export type MessageState =
   | 'deferred'
   | 'scheduled'
   | 'dead_lettered'
+
+export interface Subscription {
+  topic: string
+  name: string
+  expr: string // filter expression; "" = match all
+}
+
+export interface FilterTest {
+  valid: boolean
+  error?: string
+  ran: boolean
+  matched: boolean
+}

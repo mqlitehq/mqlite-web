@@ -6,10 +6,12 @@
 import { getToken, clearToken, setToken } from './auth'
 import type {
   Discovery,
+  FilterTest,
   MessageState,
   Metrics,
   QueueConfig,
   QueueInfo,
+  Subscription,
   WireMessage,
 } from './types'
 
@@ -118,6 +120,29 @@ export function subscribe(topic: string, name: string, expr?: string): Promise<u
     name,
     ...(expr ? { filter: { expr } } : {}),
   })
+}
+// Every subscription with its topic + filter expression — what ListQueues omits.
+export async function listSubscriptions(): Promise<Subscription[]> {
+  const r = await rpc<{ subscriptions?: Subscription[] }>('/mqlite.v1.AdminService/ListSubscriptions', {})
+  return r.subscriptions ?? []
+}
+
+export interface FilterSample {
+  subject?: string
+  properties?: Record<string, string>
+  bodyText?: string
+}
+// Dry-run a filter expression. Without a sample it only compiles (validate-as-you-type);
+// with one it evaluates exactly as publish-time fan-out would. Nothing is enqueued.
+export function testFilter(expr: string, sample?: FilterSample): Promise<FilterTest> {
+  let message: Partial<WireMessage> | undefined
+  if (sample) {
+    message = {}
+    if (sample.subject) message.subject = sample.subject
+    if (sample.properties && Object.keys(sample.properties).length) message.properties = sample.properties
+    if (sample.bodyText) message.body = encodeBody(sample.bodyText)
+  }
+  return rpc<FilterTest>('/mqlite.v1.AdminService/TestFilter', { expr, ...(message ? { message } : {}) })
 }
 export async function redrive(queue: string, opts: { target?: string; max?: number; older_than_ms?: number } = {}): Promise<number> {
   const r = await rpc<{ moved?: number }>('/mqlite.v1.AdminService/Redrive', { queue, ...opts })

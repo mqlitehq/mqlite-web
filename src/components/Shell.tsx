@@ -3,15 +3,46 @@ import { discovery } from '../lib/api'
 import type { Discovery } from '../lib/types'
 import { cn } from '../lib/cn'
 import { Overview } from '../views/Overview'
-import { QueueDetail } from '../views/QueueDetail'
+import { Queues } from '../views/Queues'
+import { Topics } from '../views/Topics'
+import { Metrics } from '../views/Metrics'
+import { Detail } from '../views/Detail'
+
+export type View = 'overview' | 'queues' | 'topics' | 'metrics'
+export interface DetailTarget {
+  kind: 'queue' | 'subscription'
+  name: string
+  topic?: string
+}
+
+const NAV: { id: View; label: string }[] = [
+  { id: 'overview', label: 'overview' },
+  { id: 'queues', label: 'queues' },
+  { id: 'topics', label: 'topics' },
+  { id: 'metrics', label: 'metrics' },
+]
 
 export function Shell({ onSignOut }: { onSignOut: () => void }) {
-  const [selected, setSelected] = useState<string | null>(null)
+  const [view, setView] = useState<View>('overview')
+  const [detail, setDetail] = useState<DetailTarget | null>(null)
   const [info, setInfo] = useState<Discovery | null>(null)
 
   useEffect(() => {
     discovery().then(setInfo)
   }, [])
+
+  const openQueue = (name: string) => {
+    setView('queues')
+    setDetail({ kind: 'queue', name })
+  }
+  const openSub = (topic: string, name: string) => {
+    setView('topics')
+    setDetail({ kind: 'subscription', name, topic })
+  }
+  const go = (v: View) => {
+    setDetail(null)
+    setView(v)
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -22,14 +53,18 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           <span className="text-xs text-muted-foreground">console</span>
         </div>
 
-        <nav className="flex-1 p-2">
-          <NavItem active={!selected} onClick={() => setSelected(null)}>
-            overview
-          </NavItem>
-          {selected && (
+        <nav className="flex-1 space-y-0.5 p-2">
+          {NAV.map((n) => (
+            <NavItem key={n.id} active={!detail && view === n.id} onClick={() => go(n.id)}>
+              {n.label}
+            </NavItem>
+          ))}
+          {detail && (
             <div className="mt-1 flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-foreground">
               <span className="text-accent">▸</span>
-              <span className="truncate">{selected}</span>
+              <span className="truncate" title={detail.name}>
+                {detail.name}
+              </span>
             </div>
           )}
         </nav>
@@ -50,10 +85,16 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
       </aside>
 
       <main className="min-w-0 flex-1 overflow-auto p-6">
-        {selected ? (
-          <QueueDetail name={selected} onBack={() => setSelected(null)} />
+        {detail ? (
+          <Detail target={detail} onBack={() => setDetail(null)} onOpenSub={openSub} />
+        ) : view === 'overview' ? (
+          <Overview onOpenQueue={openQueue} onOpenSub={openSub} onNav={go} />
+        ) : view === 'queues' ? (
+          <Queues onOpen={openQueue} />
+        ) : view === 'topics' ? (
+          <Topics onOpenSub={openSub} />
         ) : (
-          <Overview onOpen={setSelected} />
+          <Metrics onOpenQueue={openQueue} onOpenSub={openSub} />
         )}
       </main>
     </div>
