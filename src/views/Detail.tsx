@@ -2,12 +2,10 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   bodySize,
   cancel,
-  complete,
   decodeBody,
   listSubscriptions,
   peek,
   purge,
-  receive,
   redrive,
   stats,
   subscribe,
@@ -28,6 +26,7 @@ import {
 } from '../components/ui'
 import { FilterEditor } from '../components/FilterEditor'
 import { PublishPanel, SendPanel } from '../components/Composer'
+import { Receiver } from '../components/Receiver'
 import { MessageDetail } from '../components/MessageDetail'
 import { Time } from '../components/Time'
 import { fmtBytes } from '../lib/format'
@@ -59,6 +58,7 @@ export function Detail({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [panel, setPanel] = useState(false) // send / publish composer
+  const [showRecv, setShowRecv] = useState(false) // receive & settle
   const [editFilter, setEditFilter] = useState(false)
 
   const loadStats = useCallback(() => {
@@ -243,6 +243,8 @@ export function Detail({
           <SendPanel queue={name} onClose={() => setPanel(false)} onSent={refresh} />
         ))}
 
+      {showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refresh} />}
+
       <div className="mt-5 flex items-center gap-1 border-b border-border">
         {TABS.map((t) => (
           <button
@@ -280,8 +282,8 @@ export function Detail({
             </>
           )}
           {tab === 'active' && (
-            <Button variant="outline" size="sm" disabled={busy || !m?.active} onClick={() => act(() => receiveOne(name))}>
-              receive 1
+            <Button variant="outline" size="sm" disabled={busy || !m?.active} onClick={() => setShowRecv((v) => !v)}>
+              receive
             </Button>
           )}
         </div>
@@ -387,16 +389,4 @@ export function Detail({
       )}
     </div>
   )
-}
-
-// receive one message and immediately complete it (a manual drain, for testing).
-async function receiveOne(name: string): Promise<string> {
-  const got = await receive(name, 1, 0)
-  if (got.length === 0) return 'nothing to receive'
-  const msg = got[0]
-  if (msg.seq_number && msg.lock_token) {
-    await complete(name, msg.seq_number, msg.lock_token)
-    return `received + completed seq ${msg.seq_number}`
-  }
-  return 'received a message'
 }

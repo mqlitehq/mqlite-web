@@ -212,3 +212,6 @@ export function abandon(queue: string, seq: number, token: string, delayMs = 0):
 export function reject(queue: string, seq: number, token: string, reason = 'rejected via console'): Promise<unknown> {
   return rpc('/mqlite.v1.QueueService/Reject', { queue, seq_number: seq, lock_token: token, dead_letter_reason: reason })
 }
+export function defer(queue: string, seq: number, token: string): Promise<unknown> {
+  return rpc('/mqlite.v1.QueueService/Defer', { queue, seq_number: seq, lock_token: token })
+}
