@@ -2,7 +2,8 @@ import { useState, type ReactNode } from 'react'
 import { createQueue } from '../lib/api'
 import { useTopology } from '../lib/useTopology'
 import { Badge, Button, Card, Empty, ErrorBanner, Input, Label, PageHeader, Select, Spinner } from '../components/ui'
-import { ago, fmtNum } from '../lib/format'
+import { Time } from '../components/Time'
+import { fmtNum } from '../lib/format'
 
 export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
   const { queues, metrics, loading, err, reload } = useTopology()
@@ -85,7 +86,7 @@ export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
                     <Num v={m?.dead_lettered} tone={m?.dead_lettered ? 'danger' : undefined} />
                     <Num v={m?.total} bold />
                     <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">
-                      {m?.oldest_message_age_ms ? ago(Date.now() - m.oldest_message_age_ms) : '—'}
+                      {m?.oldest_message_age_ms ? <Time ms={Date.now() - m.oldest_message_age_ms} /> : '—'}
                     </td>
                     <td className="px-3 py-2.5 text-right text-faint">→</td>
                   </tr>

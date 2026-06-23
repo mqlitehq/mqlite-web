@@ -27,7 +27,8 @@ import {
 } from '../components/ui'
 import { FilterEditor } from '../components/FilterEditor'
 import { PublishPanel, SendPanel } from '../components/Composer'
-import { ago, fmtBytes } from '../lib/format'
+import { Time } from '../components/Time'
+import { fmtBytes } from '../lib/format'
 
 const TABS: { key: MessageState; label: string }[] = [
   { key: 'active', label: 'active' },
@@ -140,7 +141,7 @@ export function Detail({
 
       <div className="mt-1">
         <PageHeader
-          icon={<span className="text-accent">{isSub ? '◇' : '▸'}</span>}
+          icon={<span className="text-faint">{isSub ? '◇' : '▸'}</span>}
           title={
             <span className="flex items-center gap-2">
               {isSub && topic && <span className="text-muted-foreground">{topic}</span>}
@@ -150,9 +151,19 @@ export function Detail({
             </span>
           }
           subtitle={
-            m
-              ? `${m.total} total${m.oldest_message_age_ms > 0 ? ` · oldest ${ago(Date.now() - m.oldest_message_age_ms)}` : ''}`
-              : '…'
+            m ? (
+              <span>
+                {m.total} total
+                {m.oldest_message_age_ms > 0 && (
+                  <>
+                    {' · oldest '}
+                    <Time ms={Date.now() - m.oldest_message_age_ms} />
+                  </>
+                )}
+              </span>
+            ) : (
+              '…'
+            )
           }
           actions={
             <>
@@ -301,7 +312,9 @@ export function Detail({
               {msgs.map((msg) => (
                 <tr key={msg.seq_number} className="border-b border-border/60 align-top last:border-0 hover:bg-muted/30">
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{msg.seq_number}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{ago(msg.enqueued_at_ms)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+                    <Time ms={msg.enqueued_at_ms} />
+                  </td>
                   <td className="px-3 py-2 text-center tabular-nums">
                     {msg.delivery_count ? <span className="text-warn">{msg.delivery_count}</span> : <span className="text-faint">0</span>}
                   </td>

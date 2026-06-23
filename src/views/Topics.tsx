@@ -93,7 +93,7 @@ function TopicCard({
     <Card>
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-accent">◇</span>
+          <span className="text-faint">◇</span>
           <span className="font-semibold">{topic.name}</span>
           <Badge tone="neutral">{topic.subscriptions.length} sub</Badge>
         </div>

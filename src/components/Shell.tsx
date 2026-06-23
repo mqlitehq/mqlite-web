@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { discovery } from '../lib/api'
 import type { Discovery } from '../lib/types'
 import { cn } from '../lib/cn'
+import { TimeFormatToggle } from './Time'
 import { Overview } from '../views/Overview'
 import { Queues } from '../views/Queues'
 import { Topics } from '../views/Topics'
@@ -45,46 +46,34 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-surface/40">
-        <div className="flex h-12 items-center gap-2 border-b border-border px-4">
-          <span className="text-accent">▸</span>
-          <span className="font-semibold">mqlite</span>
-          <span className="text-xs text-muted-foreground">console</span>
-        </div>
-
-        <nav className="flex-1 space-y-0.5 p-2">
-          {NAV.map((n) => (
-            <NavItem key={n.id} active={!detail && view === n.id} onClick={() => go(n.id)}>
-              {n.label}
-            </NavItem>
-          ))}
-          {detail && (
-            <div className="mt-1 flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-foreground">
-              <span className="text-accent">▸</span>
-              <span className="truncate" title={detail.name}>
-                {detail.name}
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 h-14 border-b border-border bg-surface-header/95 backdrop-blur">
+        <div className="mx-auto flex h-full max-w-6xl items-center gap-7 px-6">
+          <Logo />
+          <nav className="flex h-full items-stretch gap-5">
+            {NAV.map((n) => (
+              <NavItem key={n.id} active={view === n.id} onClick={() => go(n.id)}>
+                {n.label}
+              </NavItem>
+            ))}
+          </nav>
+          <div className="ml-auto flex items-center gap-4">
+            <TimeFormatToggle />
+            <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" title={info?.status ?? 'online'}>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-ok" />
+              <span className="text-faint">
+                {info?.name ?? 'broker'}
+                {info?.version ? ` ${info.version}` : ''}
               </span>
             </div>
-          )}
-        </nav>
-
-        <div className="border-t border-border p-3 text-xs text-muted-foreground">
-          <div className="truncate text-foreground/80">
-            {info?.name ?? 'broker'}
-            {info?.version ? ` ${info.version}` : ''}
+            <button onClick={onSignOut} className="text-xs text-muted-foreground transition-colors hover:text-danger">
+              sign out →
+            </button>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-faint">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-ok" />
-            {info?.status ?? 'online'}
-          </div>
-          <button onClick={onSignOut} className="mt-3 text-muted-foreground transition-colors hover:text-danger">
-            sign out →
-          </button>
         </div>
-      </aside>
+      </header>
 
-      <main className="min-w-0 flex-1 overflow-auto p-6">
+      <main className="mx-auto max-w-6xl px-6 py-7">
         {detail ? (
           <Detail target={detail} onBack={() => setDetail(null)} onOpenSub={openSub} />
         ) : view === 'overview' ? (
@@ -101,16 +90,27 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
   )
 }
 
+// Two-tone wordmark: white "mq" against black, then "lite" black-on-orange box.
+function Logo() {
+  return (
+    <div className="flex select-none items-center" title="mqlite console">
+      <span className="text-[17px] font-bold tracking-tight text-foreground">mq</span>
+      <span className="rounded-md bg-accent px-1 text-[17px] font-bold tracking-tight text-accent-foreground">lite</span>
+    </div>
+  )
+}
+
 function NavItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-        active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+        'relative flex h-full items-center text-sm font-semibold transition-colors',
+        active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
       )}
     >
       {children}
+      {active && <span className="absolute inset-x-0 bottom-0 h-[2px] bg-accent" />}
     </button>
   )
 }

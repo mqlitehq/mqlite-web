@@ -34,7 +34,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div
           className="h-[440px] w-[440px] rounded-full"
-          style={{ background: 'radial-gradient(circle, oklch(0.84 0.16 84 / 9%), transparent 70%)' }}
+          style={{ background: 'radial-gradient(circle, rgb(255 144 0 / 9%), transparent 70%)' }}
         />
       </div>
 
@@ -42,9 +42,11 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
         onSubmit={submit}
         className="relative w-full max-w-sm rounded-xl bg-surface p-6 ring-1 ring-border shadow-[0_0_70px_-24px] shadow-accent/40"
       >
-        <div className="flex items-baseline gap-2">
-          <span className="text-lg font-semibold text-accent">▸</span>
-          <h1 className="text-xl font-semibold tracking-tight">mqlite</h1>
+        <div className="flex items-center gap-2">
+          <div className="flex select-none items-center">
+            <span className="text-xl font-bold tracking-tight text-foreground">mq</span>
+            <span className="rounded-md bg-accent px-1 text-xl font-bold tracking-tight text-accent-foreground">lite</span>
+          </div>
           <span className="text-xs text-muted-foreground">console</span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
