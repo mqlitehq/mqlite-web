@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { discovery } from '../lib/api'
 import type { Discovery } from '../lib/types'
 import { cn } from '../lib/cn'
@@ -8,11 +8,8 @@ import { Overview } from '../views/Overview'
 import { Queues } from '../views/Queues'
 import { Topics } from '../views/Topics'
 import { Metrics } from '../views/Metrics'
+import { Docs } from '../views/Docs'
 import { Detail } from '../views/Detail'
-
-// docs pull in a markdown renderer + the bundled markdown — lazy so they don't weigh down
-// the main bundle (loaded only when the docs tab is opened).
-const Docs = lazy(() => import('../views/Docs').then((m) => ({ default: m.Docs })))
 
 export type View = 'overview' | 'queues' | 'topics' | 'metrics' | 'docs'
 export interface DetailTarget {
@@ -91,9 +88,7 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
         ) : view === 'metrics' ? (
           <Metrics onOpenQueue={openQueue} onOpenSub={openSub} />
         ) : (
-          <Suspense fallback={<div className="text-sm text-muted-foreground">loading docs…</div>}>
-            <Docs />
-          </Suspense>
+          <Docs />
         )}
       </main>
     </div>
