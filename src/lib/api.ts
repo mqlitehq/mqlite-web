@@ -195,6 +195,14 @@ export async function peek(queue: string, state: MessageState | '', max = 50): P
   })
   return r.messages ?? []
 }
+// Pull specific deferred messages back by seq (they hold their lock until you settle).
+export async function receiveDeferred(queue: string, seqs: number[]): Promise<WireMessage[]> {
+  const r = await rpc<{ messages?: WireMessage[] }>('/mqlite.v1.QueueService/ReceiveDeferred', {
+    queue,
+    seq_numbers: seqs,
+  })
+  return r.messages ?? []
+}
 export async function receive(queue: string, max = 10, waitMs = 0): Promise<WireMessage[]> {
   const r = await rpc<{ messages?: WireMessage[] }>('/mqlite.v1.QueueService/Receive', {
     queue,

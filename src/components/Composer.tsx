@@ -22,20 +22,27 @@ export function PublishPanel({
   const [body, setBody] = useState('{"amount": 250}')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [warn, setWarn] = useState('')
   const [err, setErr] = useState('')
 
   async function publish() {
     setBusy(true)
     setErr('')
     setNote('')
+    setWarn('')
     const properties = kvRecord(props)
     try {
-      await send(topic, {
+      const seqs = await send(topic, {
         ...(subject ? { subject } : {}),
         ...(Object.keys(properties).length ? { properties } : {}),
         bodyText: body,
       })
-      setNote('published — fanned out to matching subscriptions')
+      // a topic publish returns seq 0 when no subscription filter matched — dropped.
+      if (seqs.every((s) => s <= 0)) {
+        setWarn('matched no subscription — the message was dropped (not delivered)')
+      } else {
+        setNote('published — routed to matching subscription(s)')
+      }
       onPublished()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'publish failed')
@@ -60,6 +67,7 @@ export function PublishPanel({
       </div>
       {err && <ErrorBanner message={err} />}
       {note && <p className="text-xs text-ok">✓ {note}</p>}
+      {warn && <p className="text-xs text-warn">⚠ {warn}</p>}
       <div className="flex justify-end">
         <Button size="sm" disabled={busy} onClick={publish}>
           {busy ? 'publishing…' : `publish to ${topic}`}

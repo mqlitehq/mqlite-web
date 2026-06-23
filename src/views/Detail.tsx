@@ -27,6 +27,7 @@ import {
 import { FilterEditor } from '../components/FilterEditor'
 import { PublishPanel, SendPanel } from '../components/Composer'
 import { Receiver } from '../components/Receiver'
+import { DeferredSettle } from '../components/DeferredSettle'
 import { MessageDetail } from '../components/MessageDetail'
 import { Time } from '../components/Time'
 import { fmtBytes } from '../lib/format'
@@ -375,6 +376,18 @@ export function Detail({
                                 cancel — delete this scheduled message
                               </Button>
                               <span className="text-[11px] text-faint">removes it before it ever activates</span>
+                            </div>
+                          )}
+                          {msg.state === 'deferred' && msg.seq_number != null && (
+                            <div className="border-t border-border bg-surface-2/40 px-4 py-2">
+                              <DeferredSettle
+                                queue={name}
+                                seq={msg.seq_number}
+                                onDone={() => {
+                                  setOpenSeq(null)
+                                  refresh()
+                                }}
+                              />
                             </div>
                           )}
                         </td>
