@@ -3,6 +3,7 @@ import { testFilter, type FilterSample } from '../lib/api'
 import type { FilterTest } from '../lib/types'
 import { Badge, Button, Input, Label, Textarea } from './ui'
 import { FilterReference } from './FilterReference'
+import { KVEditor, kvRecord, type KV } from './KVEditor'
 import { cn } from '../lib/cn'
 
 // The online filter editor. An expr-lang predicate is validated *as you type* (the broker
@@ -115,7 +116,7 @@ function Status({
 function SampleTester({ expr, canRun }: { expr: string; canRun: boolean }) {
   const [open, setOpen] = useState(false)
   const [subject, setSubject] = useState('orders.created')
-  const [props, setProps] = useState<{ k: string; v: string }[]>([{ k: 'tier', v: 'gold' }])
+  const [props, setProps] = useState<KV[]>([{ k: 'tier', v: 'gold' }])
   const [body, setBody] = useState('{"amount": 250}')
   const [result, setResult] = useState<FilterTest | null>(null)
   const [busy, setBusy] = useState(false)
@@ -125,7 +126,7 @@ function SampleTester({ expr, canRun }: { expr: string; canRun: boolean }) {
     setBusy(true)
     const sample: FilterSample = {
       ...(subject ? { subject } : {}),
-      properties: Object.fromEntries(props.filter((p) => p.k).map((p) => [p.k, p.v])),
+      properties: kvRecord(props),
       ...(body ? { bodyText: body } : {}),
     }
     const mine = ++seq.current
@@ -156,35 +157,7 @@ function SampleTester({ expr, canRun }: { expr: string; canRun: boolean }) {
           </div>
           <div>
             <Label>properties</Label>
-            <div className="space-y-1.5">
-              {props.map((p, i) => (
-                <div key={i} className="flex gap-1.5">
-                  <Input
-                    className="flex-1"
-                    placeholder="key"
-                    value={p.k}
-                    onChange={(e) => setProps((ps) => ps.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)))}
-                  />
-                  <Input
-                    className="flex-1"
-                    placeholder="value"
-                    value={p.v}
-                    onChange={(e) => setProps((ps) => ps.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)))}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setProps((ps) => ps.filter((_, j) => j !== i))}
-                    aria-label="remove property"
-                  >
-                    ✕
-                  </Button>
-                </div>
-              ))}
-              <Button variant="ghost" size="sm" onClick={() => setProps((ps) => [...ps, { k: '', v: '' }])}>
-                + property
-              </Button>
-            </div>
+            <KVEditor pairs={props} onChange={setProps} />
           </div>
           <div>
             <Label>body</Label>

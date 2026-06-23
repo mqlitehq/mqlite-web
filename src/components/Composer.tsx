@@ -1,18 +1,10 @@
 import { useState } from 'react'
 import { send } from '../lib/api'
 import { Button, Card, ErrorBanner, Input, Label, Textarea } from './ui'
-
-function parseProps(raw: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const pair of raw.split(',')) {
-    const [k, ...rest] = pair.split('=')
-    if (k.trim()) out[k.trim()] = rest.join('=').trim()
-  }
-  return out
-}
+import { KVEditor, kvRecord, type KV } from './KVEditor'
 
 // Publish to a topic — fans out to every subscription whose filter matches. Properties are
-// editable because filters routinely key off them (`properties["tier"] == "gold"`).
+// entered as key/value rows because filters routinely key off them (`properties["tier"]`).
 export function PublishPanel({
   topic,
   onPublished,
@@ -23,7 +15,10 @@ export function PublishPanel({
   bordered?: boolean
 }) {
   const [subject, setSubject] = useState('orders.created')
-  const [props, setProps] = useState('region=eu, tier=gold')
+  const [props, setProps] = useState<KV[]>([
+    { k: 'region', v: 'eu' },
+    { k: 'tier', v: 'gold' },
+  ])
   const [body, setBody] = useState('{"amount": 250}')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
@@ -33,7 +28,7 @@ export function PublishPanel({
     setBusy(true)
     setErr('')
     setNote('')
-    const properties = parseProps(props)
+    const properties = kvRecord(props)
     try {
       await send(topic, {
         ...(subject ? { subject } : {}),
@@ -51,15 +46,13 @@ export function PublishPanel({
 
   return (
     <div className={bordered ? 'space-y-3 border-b border-border bg-surface/50 px-4 py-3' : 'space-y-3'}>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>subject</Label>
-          <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="orders.created" />
-        </div>
-        <div>
-          <Label>properties (k=v, comma-separated)</Label>
-          <Input value={props} onChange={(e) => setProps(e.target.value)} placeholder="region=eu, tier=gold" />
-        </div>
+      <div>
+        <Label>subject</Label>
+        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="orders.created" />
+      </div>
+      <div>
+        <Label>properties</Label>
+        <KVEditor pairs={props} onChange={setProps} />
       </div>
       <div>
         <Label>body</Label>

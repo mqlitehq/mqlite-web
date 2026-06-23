@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { FILTER_INTRO, FILTER_REF, filterRefText } from '../lib/filterRef'
 import { Button } from './ui'
 
-// A flip-through reference for the filter language, opened from the editor. Every example
-// inserts on click; "copy for AI" yields the whole spec as plain text.
+// A flip-through reference for the filter language, opened from the editor. Each example
+// row has explicit copy / insert buttons; "copy for AI" yields the whole spec as text.
 export function FilterReference({
   onInsert,
   onClose,
@@ -12,6 +12,7 @@ export function FilterReference({
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [copiedExpr, setCopiedExpr] = useState<string | null>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -29,6 +30,16 @@ export function FilterReference({
     }
   }
 
+  async function copyExpr(expr: string) {
+    try {
+      await navigator.clipboard.writeText(expr)
+      setCopiedExpr(expr)
+      setTimeout(() => setCopiedExpr((c) => (c === expr ? null : c)), 1200)
+    } catch {
+      /* clipboard blocked */
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 sm:p-8"
@@ -41,7 +52,7 @@ export function FilterReference({
         <div className="sticky top-0 flex items-center justify-between gap-3 rounded-t-xl border-b border-border bg-surface px-5 py-3">
           <div className="flex items-baseline gap-2">
             <span className="font-semibold">filter expression reference</span>
-            <span className="text-xs text-faint">click any example to insert</span>
+            <span className="hidden text-xs text-faint sm:inline">copy or insert any example</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={copyForAI}>
@@ -62,15 +73,20 @@ export function FilterReference({
               {s.intro && <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{s.intro}</p>}
               <div className="divide-y divide-border/50 rounded-lg ring-1 ring-border">
                 {s.rows?.map((r) => (
-                  <button
-                    key={r.expr}
-                    onClick={() => onInsert(r.expr)}
-                    title="insert"
-                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-muted/40 sm:flex-row sm:items-baseline sm:gap-3"
-                  >
-                    <code className="shrink-0 font-mono text-xs text-foreground/90 group-hover:text-foreground">{r.expr}</code>
-                    <span className="text-[11px] text-muted-foreground sm:ml-auto sm:text-right">{r.desc}</span>
-                  </button>
+                  <div key={r.expr} className="flex items-start gap-3 px-3 py-2 hover:bg-muted/20">
+                    <code className="min-w-0 flex-1 break-all font-mono text-xs text-foreground/90">{r.expr}</code>
+                    <span className="hidden max-w-[13rem] shrink-0 text-right text-[11px] leading-snug text-muted-foreground sm:block">
+                      {r.desc}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <RowBtn onClick={() => copyExpr(r.expr)} title="copy this expression">
+                        {copiedExpr === r.expr ? '✓' : 'copy'}
+                      </RowBtn>
+                      <RowBtn onClick={() => onInsert(r.expr)} title="insert into the editor">
+                        insert
+                      </RowBtn>
+                    </div>
+                  </div>
                 ))}
               </div>
               {s.note && (
@@ -84,5 +100,17 @@ export function FilterReference({
         </div>
       </div>
     </div>
+  )
+}
+
+function RowBtn({ onClick, title, children }: { onClick: () => void; title: string; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="rounded-md border border-border-strong px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-accent hover:text-foreground"
+    >
+      {children}
+    </button>
   )
 }
