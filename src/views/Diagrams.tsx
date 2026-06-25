@@ -108,7 +108,7 @@ export function Diagrams() {
       {/* ── Figure 1: two delivery targets ───────────────────────────────────── */}
       <Figure
         title="Two delivery targets — queue vs. topic fan-out"
-        viewBox="0 0 800 350"
+        viewBox="0 0 900 380"
         caption={
           <>
             <p>
@@ -124,52 +124,61 @@ export function Diagrams() {
           </>
         }
       >
-        {/* A · direct to a queue */}
+        {/* A · direct to a queue — producer → queue → consumer; DLQ is a closed side-loop */}
         <Heading x={30}>A · send straight to a queue</Heading>
-        <Box x={50} y={40} w={160} h={32} lines={['producer']} />
-        <Arrow x1={130} y1={72} x2={130} y2={98} label={'send "orders"'} />
-        <rect x={35} y={104} width={220} height={182} rx={6} fill="none" stroke="var(--color-border-strong)" strokeWidth={1.5} />
-        <text x={145} y={120} textAnchor="middle" fontSize={12} fontWeight={600} fill="var(--color-foreground)">
+        <Box x={40} y={40} w={170} h={32} lines={['producer']} />
+        <Arrow x1={125} y1={72} x2={125} y2={98} label={'send "orders"'} />
+        <rect x={30} y={104} width={190} height={128} rx={6} fill="none" stroke="var(--color-border-strong)" strokeWidth={1.5} />
+        <text x={125} y={120} textAnchor="middle" fontSize={12} fontWeight={600} fill="var(--color-foreground)">
           queue · orders
         </text>
-        <Box x={55} y={130} w={180} h={30} lines={['active']} tone="ok" />
-        <Arrow x1={145} y1={160} x2={145} y2={174} />
-        <Box x={55} y={176} w={180} h={30} lines={['locked (in-flight)']} tone="warn" />
-        <Arrow x1={145} y1={206} x2={145} y2={220} />
-        <Box x={55} y={222} w={180} h={30} lines={['dead-letter (DLQ)']} tone="danger" />
-        <Arrow x1={145} y1={286} x2={145} y2={310} label="receive" />
-        <Box x={50} y={312} w={160} h={32} lines={['consumer']} />
+        <Box x={45} y={132} w={160} h={30} lines={['active']} tone="ok" />
+        <Arrow x1={125} y1={162} x2={125} y2={176} label="claim" />
+        <Box x={45} y={178} w={160} h={30} lines={['locked (in-flight)']} tone="warn" />
+        {/* normal path: the consumer receives + completes, and the message leaves the queue */}
+        <Arrow x1={125} y1={232} x2={125} y2={262} label="receive + complete" />
+        <Box x={40} y={264} w={170} h={32} lines={['consumer']} />
+        {/* exceptional path: only on failure → DLQ, a sink that closes back via redrive / purge */}
+        <line x1={205} y1={188} x2={270} y2={182} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={237} y={172} textAnchor="middle" fontSize={10} fill="var(--color-faint)">on failure</text>
+        <Box x={270} y={160} w={152} h={36} lines={['dead-letter (DLQ)']} tone="danger" />
+        <path d="M 346 160 L 346 140 L 205 140" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={276} y={132} textAnchor="middle" fontSize={10} fill="var(--color-faint)">redrive ↺ (to active)</text>
+        <text x={346} y={212} textAnchor="middle" fontSize={10} fill="var(--color-faint)">…or purge ✗</text>
 
-        {/* B · publish to a topic, fan out */}
-        <Heading x={360}>B · publish to a topic — fan out</Heading>
+        {/* B · publish to a topic, fan out — each subscription is itself a full queue.
+            Offset the whole column right + down so it staggers clear of Column A's DLQ box. */}
+        <Heading x={410}>B · publish to a topic — fan out</Heading>
+        <g transform="translate(50,24)">
         <Box x={500} y={40} w={160} h={32} lines={['producer']} />
         <Arrow x1={580} y1={72} x2={580} y2={98} label={'publish "events"'} />
         <Box x={440} y={104} w={290} h={50} lines={['topic · events', 'routing rule — stores nothing']} tone="accent" dashed />
-        {/* three outcomes */}
+        {/* three outcomes: match → two subscription queues, no match → dropped */}
         <Arrow x1={500} y1={154} x2={465} y2={198} label="match" />
-        <Arrow x1={620} y1={154} x2={622} y2={198} label="match" />
-        <Arrow x1={700} y1={154} x2={730} y2={196} />
-        <Box x={390} y={202} w={150} h={52} lines={['sub · audit', 'backing queue']} />
-        <Box x={550} y={202} w={150} h={52} lines={['sub · billing', 'backing queue']} />
-        <text x={745} y={206} fontSize={18} fill="var(--color-danger)">
+        <Arrow x1={650} y1={154} x2={668} y2={196} label="match" />
+        <Arrow x1={740} y1={154} x2={780} y2={194} />
+        <Box x={386} y={198} w={158} h={64} lines={['sub · audit', 'backing queue', '= a queue · own DLQ']} />
+        <Box x={591} y={198} w={158} h={64} lines={['sub · billing', 'backing queue', '= a queue · own DLQ']} />
+        <text x={808} y={208} textAnchor="middle" fontSize={18} fill="var(--color-danger)">
           ✗
         </text>
-        <text x={712} y={228} fontSize={10} fill="var(--color-danger)">
+        <text x={808} y={228} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
           no match
         </text>
-        <text x={712} y={242} fontSize={10} fill="var(--color-danger)">
+        <text x={808} y={241} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
           dropped
         </text>
-        <Arrow x1={465} y1={254} x2={465} y2={282} />
-        <Arrow x1={625} y1={254} x2={625} y2={282} />
-        <Box x={390} y={284} w={150} h={30} lines={['consumer']} />
-        <Box x={550} y={284} w={150} h={30} lines={['consumer']} />
+        <Arrow x1={465} y1={262} x2={465} y2={292} label="receive" />
+        <Arrow x1={670} y1={262} x2={670} y2={292} label="receive" />
+        <Box x={386} y={294} w={158} h={32} lines={['consumer']} />
+        <Box x={591} y={294} w={158} h={32} lines={['consumer']} />
+        </g>
       </Figure>
 
       {/* ── Figure 2: a message's life ───────────────────────────────────────── */}
       <Figure
         title="A message's life — states & settlement"
-        viewBox="0 0 720 250"
+        viewBox="0 0 720 285"
         caption={
           <>
             <p>
@@ -177,32 +186,59 @@ export function Diagrams() {
               holds messages by state, and only <strong className="text-foreground">active</strong> is claimable.
             </p>
             <p>
-              Automatic transitions: a message redelivered past <strong className="text-foreground">max-delivery-count</strong>{' '}
-              → DLQ; a <strong className="text-foreground">TTL</strong> expiry → DLQ (if dead-letter-on-expire) or
-              discarded. A <strong className="text-foreground">deferred</strong> message is retrieved later by its seq
-              (ReceiveDeferred).
+              Two ways back to <strong className="text-foreground">active</strong>: an explicit{' '}
+              <strong className="text-foreground">abandon</strong>, or an automatic{' '}
+              <strong className="text-foreground">lock expiry</strong> (the reaper). Both redeliver while{' '}
+              <strong className="text-foreground">delivery_count &lt; max</strong>; once it reaches{' '}
+              <strong className="text-foreground">max</strong> (or on an explicit <strong className="text-foreground">reject</strong>)
+              the message dead-letters. A <strong className="text-foreground">TTL</strong> expiry → DLQ (if
+              dead-letter-on-expire) or is discarded; a scheduled message can be <strong className="text-foreground">cancelled</strong>{' '}
+              before it activates.
+            </p>
+            <p>
+              A <strong className="text-foreground">deferred</strong> message is retrieved later by its seq
+              (ReceiveDeferred); a dead-lettered one is sent back to active with{' '}
+              <strong className="text-foreground">redrive</strong> (delivery_count reset), or removed by purge / retention.
             </p>
           </>
         }
       >
         <Box x={20} y={70} w={120} h={36} lines={['scheduled']} tone="info" />
-        <Arrow x1={140} y1={88} x2={185} y2={88} label="due" />
+        <Arrow x1={142} y1={88} x2={185} y2={88} />
+        <text x={163} y={79} textAnchor="middle" fontSize={10} fill="var(--color-faint)">due</text>
         <Box x={185} y={70} w={120} h={36} lines={['active']} tone="ok" />
-        <Arrow x1={305} y1={88} x2={360} y2={88} label="receive" />
+        <Arrow x1={307} y1={88} x2={360} y2={88} />
+        <text x={333} y={79} textAnchor="middle" fontSize={10} fill="var(--color-faint)">receive</text>
         <Box x={360} y={70} w={120} h={36} lines={['locked']} tone="warn" />
 
         {/* settlement branches from locked */}
-        <Arrow x1={480} y1={80} x2={545} y2={46} label="complete" />
+        <Arrow x1={480} y1={78} x2={545} y2={46} />
+        <text x={502} y={56} textAnchor="middle" fontSize={10} fill="var(--color-faint)">complete</text>
         <Box x={545} y={30} w={150} h={32} lines={['completed ✓']} />
-        <Arrow x1={480} y1={88} x2={545} y2={104} label="defer" />
+        {/* defer is bidirectional: defer parks the message, ReceiveDeferred (by seq) brings it back to locked */}
+        <line x1={485} y1={92} x2={542} y2={98} stroke="var(--color-faint)" strokeWidth={1.5} markerStart="url(#arr)" markerEnd="url(#arr)" />
+        <text x={513} y={82} textAnchor="middle" fontSize={10} fill="var(--color-faint)">defer ⇄</text>
         <Box x={545} y={88} w={150} h={32} lines={['deferred']} tone="info" />
-        <Arrow x1={480} y1={98} x2={545} y2={162} label="reject" />
-        <Box x={545} y={146} w={150} h={32} lines={['dead-letter']} tone="danger" />
+        <Arrow x1={486} y1={106} x2={545} y2={160} />
+        <text x={620} y={135} textAnchor="middle" fontSize={10} fill="var(--color-faint)">reject / count ≥ max</text>
+        <Box x={545} y={146} w={150} h={32} lines={['dead-letter (DLQ)']} tone="danger" />
 
-        {/* abandon loop back to active */}
+        {/* cancel: a not-yet-active scheduled message is removed */}
+        <Arrow x1={80} y1={106} x2={80} y2={128} label="cancel" />
+        <text x={58} y={144} fontSize={11} fill="var(--color-danger)">
+          ✗ removed
+        </text>
+
+        {/* requeue loop: abandon OR lock-expiry, while count < max, re-delivers to active */}
         <path d="M 420 106 L 420 205 L 245 205 L 245 106" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} markerEnd="url(#arr)" />
-        <text x={300} y={220} fontSize={10} fill="var(--color-faint)">
-          abandon → redelivered (delivery_count++)
+        <text x={250} y={222} fontSize={10} fill="var(--color-faint)">
+          abandon / lock-expiry, count &lt; max → redelivered (count++)
+        </text>
+
+        {/* redrive loop: a dead-letter sent back to active with delivery_count reset */}
+        <path d="M 600 178 L 600 252 L 225 252 L 225 106" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} markerEnd="url(#arr)" />
+        <text x={250} y={268} fontSize={10} fill="var(--color-faint)">
+          redrive → active (delivery_count reset to 0)
         </text>
       </Figure>
     </div>
