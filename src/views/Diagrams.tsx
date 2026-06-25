@@ -133,9 +133,11 @@ export function Diagrams() {
           queue · orders
         </text>
         <Box x={55} y={130} w={180} h={30} lines={['active']} tone="ok" />
-        <Arrow x1={145} y1={160} x2={145} y2={174} />
+        <Arrow x1={145} y1={160} x2={145} y2={174} label="claim" />
         <Box x={55} y={176} w={180} h={30} lines={['locked (in-flight)']} tone="warn" />
-        <Arrow x1={145} y1={206} x2={145} y2={220} />
+        {/* DLQ is the exceptional branch, not the normal next step — dashed + labelled */}
+        <line x1={145} y1={206} x2={145} y2={220} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={152} y={213} fontSize={10} dominantBaseline="central" fill="var(--color-faint)">only on failure</text>
         <Box x={55} y={222} w={180} h={30} lines={['dead-letter (DLQ)']} tone="danger" />
         <Arrow x1={145} y1={286} x2={145} y2={310} label="receive" />
         <Box x={50} y={312} w={160} h={32} lines={['consumer']} />
@@ -195,17 +197,23 @@ export function Diagrams() {
         }
       >
         <Box x={20} y={70} w={120} h={36} lines={['scheduled']} tone="info" />
-        <Arrow x1={140} y1={88} x2={185} y2={88} label="due" />
+        <Arrow x1={142} y1={88} x2={185} y2={88} />
+        <text x={163} y={79} textAnchor="middle" fontSize={10} fill="var(--color-faint)">due</text>
         <Box x={185} y={70} w={120} h={36} lines={['active']} tone="ok" />
-        <Arrow x1={305} y1={88} x2={360} y2={88} label="receive" />
+        <Arrow x1={307} y1={88} x2={360} y2={88} />
+        <text x={333} y={79} textAnchor="middle" fontSize={10} fill="var(--color-faint)">receive</text>
         <Box x={360} y={70} w={120} h={36} lines={['locked']} tone="warn" />
 
         {/* settlement branches from locked */}
-        <Arrow x1={480} y1={80} x2={545} y2={46} label="complete" />
+        <Arrow x1={480} y1={78} x2={545} y2={46} />
+        <text x={502} y={56} textAnchor="middle" fontSize={10} fill="var(--color-faint)">complete</text>
         <Box x={545} y={30} w={150} h={32} lines={['completed ✓']} />
-        <Arrow x1={480} y1={88} x2={545} y2={104} label="defer" />
+        {/* defer is bidirectional: defer parks the message, ReceiveDeferred (by seq) brings it back to locked */}
+        <line x1={485} y1={92} x2={542} y2={98} stroke="var(--color-faint)" strokeWidth={1.5} markerStart="url(#arr)" markerEnd="url(#arr)" />
+        <text x={513} y={82} textAnchor="middle" fontSize={10} fill="var(--color-faint)">defer ⇄</text>
         <Box x={545} y={88} w={150} h={32} lines={['deferred']} tone="info" />
-        <Arrow x1={480} y1={98} x2={545} y2={162} label="reject / count ≥ max" />
+        <Arrow x1={486} y1={106} x2={545} y2={160} />
+        <text x={620} y={135} textAnchor="middle" fontSize={10} fill="var(--color-faint)">reject / count ≥ max</text>
         <Box x={545} y={146} w={150} h={32} lines={['dead-letter (DLQ)']} tone="danger" />
 
         {/* cancel: a not-yet-active scheduled message is removed */}
