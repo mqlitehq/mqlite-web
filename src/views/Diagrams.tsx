@@ -139,12 +139,12 @@ export function Diagrams() {
         <Arrow x1={125} y1={232} x2={125} y2={262} label="receive + complete" />
         <Box x={40} y={264} w={170} h={32} lines={['consumer']} />
         {/* exceptional path: only on failure → DLQ, a sink that closes back via redrive / purge */}
-        <line x1={205} y1={193} x2={273} y2={193} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
-        <text x={239} y={184} textAnchor="middle" fontSize={10} fill="var(--color-faint)">on failure</text>
-        <Box x={273} y={175} w={122} h={36} lines={['dead-letter (DLQ)']} tone="danger" />
-        <path d="M 334 175 L 334 147 L 205 147" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
-        <text x={270} y={139} textAnchor="middle" fontSize={10} fill="var(--color-faint)">redrive ↺ (to active)</text>
-        <text x={334} y={226} textAnchor="middle" fontSize={10} fill="var(--color-faint)">…or purge ✗</text>
+        <line x1={205} y1={188} x2={270} y2={182} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={237} y={172} textAnchor="middle" fontSize={10} fill="var(--color-faint)">on failure</text>
+        <Box x={270} y={160} w={152} h={36} lines={['dead-letter (DLQ)']} tone="danger" />
+        <path d="M 346 160 L 346 140 L 205 140" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={276} y={132} textAnchor="middle" fontSize={10} fill="var(--color-faint)">redrive ↺ (to active)</text>
+        <text x={346} y={212} textAnchor="middle" fontSize={10} fill="var(--color-faint)">…or purge ✗</text>
 
         {/* B · publish to a topic, fan out — each subscription is itself a full queue */}
         <Heading x={360}>B · publish to a topic — fan out</Heading>
@@ -154,16 +154,16 @@ export function Diagrams() {
         {/* three outcomes: match → two subscription queues, no match → dropped */}
         <Arrow x1={500} y1={154} x2={465} y2={198} label="match" />
         <Arrow x1={620} y1={154} x2={622} y2={198} label="match" />
-        <Arrow x1={700} y1={154} x2={730} y2={196} />
+        <Arrow x1={700} y1={154} x2={738} y2={194} />
         <Box x={388} y={198} w={155} h={62} lines={['sub · audit', 'backing queue', '= a queue · own DLQ']} />
         <Box x={548} y={198} w={155} h={62} lines={['sub · billing', 'backing queue', '= a queue · own DLQ']} />
-        <text x={747} y={206} fontSize={18} fill="var(--color-danger)">
+        <text x={748} y={206} textAnchor="middle" fontSize={18} fill="var(--color-danger)">
           ✗
         </text>
-        <text x={714} y={228} fontSize={10} fill="var(--color-danger)">
+        <text x={748} y={226} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
           no match
         </text>
-        <text x={714} y={242} fontSize={10} fill="var(--color-danger)">
+        <text x={748} y={239} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
           dropped
         </text>
         <Arrow x1={465} y1={260} x2={465} y2={288} label="receive" />
