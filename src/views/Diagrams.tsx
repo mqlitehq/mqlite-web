@@ -108,7 +108,7 @@ export function Diagrams() {
       {/* ── Figure 1: two delivery targets ───────────────────────────────────── */}
       <Figure
         title="Two delivery targets — queue vs. topic fan-out"
-        viewBox="0 0 800 350"
+        viewBox="0 0 850 360"
         caption={
           <>
             <p>
@@ -153,23 +153,23 @@ export function Diagrams() {
         <Box x={440} y={104} w={290} h={50} lines={['topic · events', 'routing rule — stores nothing']} tone="accent" dashed />
         {/* three outcomes: match → two subscription queues, no match → dropped */}
         <Arrow x1={500} y1={154} x2={465} y2={198} label="match" />
-        <Arrow x1={620} y1={154} x2={622} y2={198} label="match" />
-        <Arrow x1={700} y1={154} x2={738} y2={194} />
-        <Box x={388} y={198} w={155} h={62} lines={['sub · audit', 'backing queue', '= a queue · own DLQ']} />
-        <Box x={548} y={198} w={155} h={62} lines={['sub · billing', 'backing queue', '= a queue · own DLQ']} />
-        <text x={748} y={206} textAnchor="middle" fontSize={18} fill="var(--color-danger)">
+        <Arrow x1={650} y1={154} x2={668} y2={196} label="match" />
+        <Arrow x1={740} y1={154} x2={780} y2={194} />
+        <Box x={386} y={198} w={158} h={64} lines={['sub · audit', 'backing queue', '= a queue · own DLQ']} />
+        <Box x={591} y={198} w={158} h={64} lines={['sub · billing', 'backing queue', '= a queue · own DLQ']} />
+        <text x={808} y={208} textAnchor="middle" fontSize={18} fill="var(--color-danger)">
           ✗
         </text>
-        <text x={748} y={226} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
+        <text x={808} y={228} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
           no match
         </text>
-        <text x={748} y={239} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
+        <text x={808} y={241} textAnchor="middle" fontSize={10} fill="var(--color-danger)">
           dropped
         </text>
-        <Arrow x1={465} y1={260} x2={465} y2={288} label="receive" />
-        <Arrow x1={625} y1={260} x2={625} y2={288} label="receive" />
-        <Box x={388} y={290} w={155} h={30} lines={['consumer']} />
-        <Box x={548} y={290} w={155} h={30} lines={['consumer']} />
+        <Arrow x1={465} y1={262} x2={465} y2={292} label="receive" />
+        <Arrow x1={670} y1={262} x2={670} y2={292} label="receive" />
+        <Box x={386} y={294} w={158} h={32} lines={['consumer']} />
+        <Box x={591} y={294} w={158} h={32} lines={['consumer']} />
       </Figure>
 
       {/* ── Figure 2: a message's life ───────────────────────────────────────── */}
