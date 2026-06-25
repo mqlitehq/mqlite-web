@@ -124,48 +124,52 @@ export function Diagrams() {
           </>
         }
       >
-        {/* A · direct to a queue */}
+        {/* A · direct to a queue — producer → queue → consumer; DLQ is a closed side-loop */}
         <Heading x={30}>A · send straight to a queue</Heading>
-        <Box x={50} y={40} w={160} h={32} lines={['producer']} />
-        <Arrow x1={130} y1={72} x2={130} y2={98} label={'send "orders"'} />
-        <rect x={35} y={104} width={220} height={182} rx={6} fill="none" stroke="var(--color-border-strong)" strokeWidth={1.5} />
-        <text x={145} y={120} textAnchor="middle" fontSize={12} fontWeight={600} fill="var(--color-foreground)">
+        <Box x={40} y={40} w={170} h={32} lines={['producer']} />
+        <Arrow x1={125} y1={72} x2={125} y2={98} label={'send "orders"'} />
+        <rect x={30} y={104} width={190} height={128} rx={6} fill="none" stroke="var(--color-border-strong)" strokeWidth={1.5} />
+        <text x={125} y={120} textAnchor="middle" fontSize={12} fontWeight={600} fill="var(--color-foreground)">
           queue · orders
         </text>
-        <Box x={55} y={130} w={180} h={30} lines={['active']} tone="ok" />
-        <Arrow x1={145} y1={160} x2={145} y2={174} label="claim" />
-        <Box x={55} y={176} w={180} h={30} lines={['locked (in-flight)']} tone="warn" />
-        {/* DLQ is the exceptional branch, not the normal next step — dashed + labelled */}
-        <line x1={145} y1={206} x2={145} y2={220} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
-        <text x={152} y={213} fontSize={10} dominantBaseline="central" fill="var(--color-faint)">only on failure</text>
-        <Box x={55} y={222} w={180} h={30} lines={['dead-letter (DLQ)']} tone="danger" />
-        <Arrow x1={145} y1={286} x2={145} y2={310} label="receive" />
-        <Box x={50} y={312} w={160} h={32} lines={['consumer']} />
+        <Box x={45} y={132} w={160} h={30} lines={['active']} tone="ok" />
+        <Arrow x1={125} y1={162} x2={125} y2={176} label="claim" />
+        <Box x={45} y={178} w={160} h={30} lines={['locked (in-flight)']} tone="warn" />
+        {/* normal path: the consumer receives + completes, and the message leaves the queue */}
+        <Arrow x1={125} y1={232} x2={125} y2={262} label="receive + complete" />
+        <Box x={40} y={264} w={170} h={32} lines={['consumer']} />
+        {/* exceptional path: only on failure → DLQ, a sink that closes back via redrive / purge */}
+        <line x1={205} y1={193} x2={273} y2={193} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={239} y={184} textAnchor="middle" fontSize={10} fill="var(--color-faint)">on failure</text>
+        <Box x={273} y={175} w={122} h={36} lines={['dead-letter (DLQ)']} tone="danger" />
+        <path d="M 334 175 L 334 147 L 205 147" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
+        <text x={270} y={139} textAnchor="middle" fontSize={10} fill="var(--color-faint)">redrive ↺ (to active)</text>
+        <text x={334} y={226} textAnchor="middle" fontSize={10} fill="var(--color-faint)">…or purge ✗</text>
 
-        {/* B · publish to a topic, fan out */}
+        {/* B · publish to a topic, fan out — each subscription is itself a full queue */}
         <Heading x={360}>B · publish to a topic — fan out</Heading>
         <Box x={500} y={40} w={160} h={32} lines={['producer']} />
         <Arrow x1={580} y1={72} x2={580} y2={98} label={'publish "events"'} />
         <Box x={440} y={104} w={290} h={50} lines={['topic · events', 'routing rule — stores nothing']} tone="accent" dashed />
-        {/* three outcomes */}
+        {/* three outcomes: match → two subscription queues, no match → dropped */}
         <Arrow x1={500} y1={154} x2={465} y2={198} label="match" />
         <Arrow x1={620} y1={154} x2={622} y2={198} label="match" />
         <Arrow x1={700} y1={154} x2={730} y2={196} />
-        <Box x={390} y={202} w={150} h={52} lines={['sub · audit', 'backing queue']} />
-        <Box x={550} y={202} w={150} h={52} lines={['sub · billing', 'backing queue']} />
-        <text x={745} y={206} fontSize={18} fill="var(--color-danger)">
+        <Box x={388} y={198} w={155} h={62} lines={['sub · audit', 'backing queue', '= a queue · own DLQ']} />
+        <Box x={548} y={198} w={155} h={62} lines={['sub · billing', 'backing queue', '= a queue · own DLQ']} />
+        <text x={747} y={206} fontSize={18} fill="var(--color-danger)">
           ✗
         </text>
-        <text x={712} y={228} fontSize={10} fill="var(--color-danger)">
+        <text x={714} y={228} fontSize={10} fill="var(--color-danger)">
           no match
         </text>
-        <text x={712} y={242} fontSize={10} fill="var(--color-danger)">
+        <text x={714} y={242} fontSize={10} fill="var(--color-danger)">
           dropped
         </text>
-        <Arrow x1={465} y1={254} x2={465} y2={282} />
-        <Arrow x1={625} y1={254} x2={625} y2={282} />
-        <Box x={390} y={284} w={150} h={30} lines={['consumer']} />
-        <Box x={550} y={284} w={150} h={30} lines={['consumer']} />
+        <Arrow x1={465} y1={260} x2={465} y2={288} label="receive" />
+        <Arrow x1={625} y1={260} x2={625} y2={288} label="receive" />
+        <Box x={388} y={290} w={155} h={30} lines={['consumer']} />
+        <Box x={548} y={290} w={155} h={30} lines={['consumer']} />
       </Figure>
 
       {/* ── Figure 2: a message's life ───────────────────────────────────────── */}
