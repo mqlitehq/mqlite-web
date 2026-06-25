@@ -169,7 +169,7 @@ export function Diagrams() {
       {/* ── Figure 2: a message's life ───────────────────────────────────────── */}
       <Figure
         title="A message's life — states & settlement"
-        viewBox="0 0 720 250"
+        viewBox="0 0 720 285"
         caption={
           <>
             <p>
@@ -177,10 +177,19 @@ export function Diagrams() {
               holds messages by state, and only <strong className="text-foreground">active</strong> is claimable.
             </p>
             <p>
-              Automatic transitions: a message redelivered past <strong className="text-foreground">max-delivery-count</strong>{' '}
-              → DLQ; a <strong className="text-foreground">TTL</strong> expiry → DLQ (if dead-letter-on-expire) or
-              discarded. A <strong className="text-foreground">deferred</strong> message is retrieved later by its seq
-              (ReceiveDeferred).
+              Two ways back to <strong className="text-foreground">active</strong>: an explicit{' '}
+              <strong className="text-foreground">abandon</strong>, or an automatic{' '}
+              <strong className="text-foreground">lock expiry</strong> (the reaper). Both redeliver while{' '}
+              <strong className="text-foreground">delivery_count &lt; max</strong>; once it reaches{' '}
+              <strong className="text-foreground">max</strong> (or on an explicit <strong className="text-foreground">reject</strong>)
+              the message dead-letters. A <strong className="text-foreground">TTL</strong> expiry → DLQ (if
+              dead-letter-on-expire) or is discarded; a scheduled message can be <strong className="text-foreground">cancelled</strong>{' '}
+              before it activates.
+            </p>
+            <p>
+              A <strong className="text-foreground">deferred</strong> message is retrieved later by its seq
+              (ReceiveDeferred); a dead-lettered one is sent back to active with{' '}
+              <strong className="text-foreground">redrive</strong> (delivery_count reset), or removed by purge / retention.
             </p>
           </>
         }
@@ -196,13 +205,25 @@ export function Diagrams() {
         <Box x={545} y={30} w={150} h={32} lines={['completed ✓']} />
         <Arrow x1={480} y1={88} x2={545} y2={104} label="defer" />
         <Box x={545} y={88} w={150} h={32} lines={['deferred']} tone="info" />
-        <Arrow x1={480} y1={98} x2={545} y2={162} label="reject" />
-        <Box x={545} y={146} w={150} h={32} lines={['dead-letter']} tone="danger" />
+        <Arrow x1={480} y1={98} x2={545} y2={162} label="reject / count ≥ max" />
+        <Box x={545} y={146} w={150} h={32} lines={['dead-letter (DLQ)']} tone="danger" />
 
-        {/* abandon loop back to active */}
+        {/* cancel: a not-yet-active scheduled message is removed */}
+        <Arrow x1={80} y1={106} x2={80} y2={128} label="cancel" />
+        <text x={58} y={144} fontSize={11} fill="var(--color-danger)">
+          ✗ removed
+        </text>
+
+        {/* requeue loop: abandon OR lock-expiry, while count < max, re-delivers to active */}
         <path d="M 420 106 L 420 205 L 245 205 L 245 106" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} markerEnd="url(#arr)" />
-        <text x={300} y={220} fontSize={10} fill="var(--color-faint)">
-          abandon → redelivered (delivery_count++)
+        <text x={250} y={222} fontSize={10} fill="var(--color-faint)">
+          abandon / lock-expiry, count &lt; max → redelivered (count++)
+        </text>
+
+        {/* redrive loop: a dead-letter sent back to active with delivery_count reset */}
+        <path d="M 600 178 L 600 252 L 225 252 L 225 106" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} markerEnd="url(#arr)" />
+        <text x={250} y={268} fontSize={10} fill="var(--color-faint)">
+          redrive → active (delivery_count reset to 0)
         </text>
       </Figure>
     </div>
