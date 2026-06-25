@@ -108,7 +108,7 @@ export function Diagrams() {
       {/* ── Figure 1: two delivery targets ───────────────────────────────────── */}
       <Figure
         title="Two delivery targets — queue vs. topic fan-out"
-        viewBox="0 0 850 360"
+        viewBox="0 0 900 380"
         caption={
           <>
             <p>
@@ -146,8 +146,10 @@ export function Diagrams() {
         <text x={276} y={132} textAnchor="middle" fontSize={10} fill="var(--color-faint)">redrive ↺ (to active)</text>
         <text x={346} y={212} textAnchor="middle" fontSize={10} fill="var(--color-faint)">…or purge ✗</text>
 
-        {/* B · publish to a topic, fan out — each subscription is itself a full queue */}
-        <Heading x={360}>B · publish to a topic — fan out</Heading>
+        {/* B · publish to a topic, fan out — each subscription is itself a full queue.
+            Offset the whole column right + down so it staggers clear of Column A's DLQ box. */}
+        <Heading x={410}>B · publish to a topic — fan out</Heading>
+        <g transform="translate(50,24)">
         <Box x={500} y={40} w={160} h={32} lines={['producer']} />
         <Arrow x1={580} y1={72} x2={580} y2={98} label={'publish "events"'} />
         <Box x={440} y={104} w={290} h={50} lines={['topic · events', 'routing rule — stores nothing']} tone="accent" dashed />
@@ -170,6 +172,7 @@ export function Diagrams() {
         <Arrow x1={670} y1={262} x2={670} y2={292} label="receive" />
         <Box x={386} y={294} w={158} h={32} lines={['consumer']} />
         <Box x={591} y={294} w={158} h={32} lines={['consumer']} />
+        </g>
       </Figure>
 
       {/* ── Figure 2: a message's life ───────────────────────────────────────── */}
