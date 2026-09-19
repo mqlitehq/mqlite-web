@@ -3,7 +3,7 @@
 A small admin web console for an [mqlite](https://github.com/mqlitehq/mqlite) broker.
 Point it at a broker, authenticate with a token, then browse **queues**, **topics**
 and their **subscriptions**, inspect messages, publish/send, edit subscription filters
-online, and redrive / purge the dead-letter queue.
+online, redrive / purge the dead-letter queue, and manage **access keys**.
 
 True-black, monospace (Geist Mono), one scarce warm accent — a terminal-flavored,
 density-first dashboard for a message queue.
@@ -23,14 +23,14 @@ because every RPC still requires a Bearer token).
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173 — proxies /mqlite.v1.* to a broker on :8080
+npm run dev        # http://localhost:5173 — proxies /mqlite.v1.* to a broker on :6754
 ```
 
 Run a broker alongside it and log in with its token (leave the URL blank — the dev server
 proxies same-origin):
 
 ```bash
-MQLITE_TOKENS=mqk_dev MQLITE_DB=file:./mq.db mqlite serve --addr :8080
+MQLITE_TOKENS=mqk_dev MQLITE_DB=file:./mq.db mqlite serve --addr :6754
 ```
 
 ## Build
@@ -41,9 +41,45 @@ npm run build      # → dist/  (static, path-relative, ~80 kB gzipped JS)
 
 ## Auth
 
-Logging in = holding one of the broker's `MQLITE_TOKENS`. The token is kept in
+Log in with a `manage` database key or one of the broker's configured
+`MQLITE_TOKENS` administrators. Send/listen keys are for applications and receive a
+clear administrator requirement at console login. The login token is kept in
 `sessionStorage` (this tab only) and sent as `Authorization: Bearer …` on every call;
-any `401` clears it and bounces back to the login screen.
+any `401` clears it and bounces back to the login screen. A `403` reports missing
+permission without clearing the session.
+
+## Access keys
+
+The **access keys** navigation entry works with mqlite v0.3.1 and later. Older
+brokers show an upgrade message; existing message and entity tools still work.
+
+| Permission      | Intended use                                                      |
+| --------------- | ----------------------------------------------------------------- |
+| `send`          | Publish, schedule, and cancel scheduled messages                  |
+| `listen`        | Browse, receive, settle, and renew messages                       |
+| `send + listen` | Processors that consume and publish                               |
+| `manage`        | All operations, including issuing and revoking administrator keys |
+
+Create a named key with optional expiry, then save the one-time secret in a secret
+manager. New tokens use `mqk_` plus 64 lowercase hexadecimal characters (256 random
+bits). The console never persists issued secrets or logs them. The broker stores
+only their SHA-256 digests. Configured administrator tokens are not listed and
+cannot be revoked through this page.
+
+A public 32-hex ID is generated with browser `crypto.getRandomValues` and retained
+in this tab **before** creation is sent. If storage or randomness is unavailable,
+creation stops. This public ID is scoped to the broker and survives reloads or
+re-login in the same tab. A lost response is never retried automatically: check
+the exact ID, revoke any undelivered key, and create a replacement with a new ID.
+A missing row does not prove an outstanding request cannot commit later. Dismissing
+an unresolved ID requires confirmation and does not revoke a key or cancel a call.
+
+Lists are paginated and show active, expired, and revoked records. Revocation
+requires confirmation and rejects newly authenticated requests; already-authorized
+operations may finish. Revoking an issuer does not revoke other keys it created.
+Rotate by creating a replacement, switching clients, and revoking the old key.
+Backups contain key state; restoring an older backup can re-enable credentials
+revoked afterward, so audit and rotate keys before reopening access.
 
 ## Integrating with the broker (deferred)
 
@@ -61,3 +97,18 @@ then merged into the broker.
 
 Vite · React · TypeScript · Tailwind CSS v4 · CVA · Geist Mono. No backend — a pure
 client over the broker's JSON-over-HTTP API (`/mqlite.v1.<Service>/<Method>`).
+
+## Browser checks
+
+```bash
+npm ci
+npm run build
+npx playwright install chromium
+npm test
+```
+
+The browser suite exercises the built console against a deterministic HTTP fixture:
+all permission choices, one-time secret handling, retained IDs, lost responses,
+pagination, revocation confirmation, login permissions, and older brokers. It does
+not import, build, or require the broker repository. Validate API changes against a
+live broker separately before embedding the new `dist/`.

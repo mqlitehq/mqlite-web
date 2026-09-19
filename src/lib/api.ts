@@ -3,9 +3,13 @@
 // the token and signalling a re-login). Base URL is '' = same origin (the broker can
 // embed and serve this console at /ui/); the dev server proxies the RPC paths.
 
-import { getToken, clearToken, setToken, getEndpoint } from './auth'
+import { getToken, clearToken, setToken, getEndpoint } from './auth.js'
 import type {
+  AccessKey,
   BrokerStatus,
+  CreateKeyRequest,
+  CreateKeyResult,
+  KeyPage,
   Discovery,
   FilterTest,
   MessageState,
@@ -14,7 +18,7 @@ import type {
   QueueInfo,
   Subscription,
   WireMessage,
-} from './types'
+} from './types.js'
 
 // Target broker base URL: the stored endpoint (standalone connector → any broker), else a
 // build-time default, else '' = same origin (embedded: the broker serves us at /ui/).
@@ -107,7 +111,18 @@ export async function discovery(): Promise<Discovery | null> {
 
 // ── auth: validate a token by making one authed call ───────────────────────────
 export async function login(token: string): Promise<void> {
-  await rpc('/mqlite.v1.AdminService/ListQueues', {}, token) // throws on 401/error
+  try {
+    await rpc('/mqlite.v1.AdminService/ListQueues', {}, token)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      throw new ApiError(
+        403,
+        'permission_denied',
+        'This admin console requires a manage key or a configured administrator token. Send and listen keys work with the API, SDK, and CLI.',
+      )
+    }
+    throw error
+  }
   setToken(token)
 }
 
@@ -221,8 +236,103 @@ export function abandon(queue: string, seq: number, token: string, delayMs = 0):
   return rpc('/mqlite.v1.QueueService/Abandon', { queue, seq_number: seq, lock_token: token, delay_ms: delayMs })
 }
 export function reject(queue: string, seq: number, token: string, reason = 'rejected via console'): Promise<unknown> {
-  return rpc('/mqlite.v1.QueueService/Reject', { queue, seq_number: seq, lock_token: token, dead_letter_reason: reason })
+  return rpc('/mqlite.v1.QueueService/Reject', {
+    queue,
+    seq_number: seq,
+    lock_token: token,
+    dead_letter_reason: reason,
+  })
 }
 export function defer(queue: string, seq: number, token: string): Promise<unknown> {
   return rpc('/mqlite.v1.QueueService/Defer', { queue, seq_number: seq, lock_token: token })
+}
+
+// ── AuthService ─────────────────────────────────────────────────────────────
+// IDs are retained by the caller before this single request. Never retry issuance:
+// a failed response does not prove the server failed to create the credential.
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function keyMetadata(value: unknown): value is AccessKey {
+  if (
+    !record(value) ||
+    typeof value.id !== 'string' ||
+    !/^[0-9a-f]{32}$/.test(value.id) ||
+    typeof value.name !== 'string' ||
+    !value.name ||
+    value.name.trim() !== value.name ||
+    new TextEncoder().encode(value.name).length > 128 ||
+    value.name.includes('\0') ||
+    !Array.isArray(value.permissions) ||
+    !value.permissions.every((permission) => typeof permission === 'string')
+  )
+    return false
+  if (!['["send"]', '["listen"]', '["send","listen"]', '["manage"]'].includes(JSON.stringify(value.permissions)))
+    return false
+  if (new TextDecoder().decode(new TextEncoder().encode(value.name)) !== value.name) return false
+  if (
+    typeof value.created_at_ms !== 'number' ||
+    typeof value.expires_at_ms !== 'number' ||
+    (value.expires_at_ms !== 0 && value.expires_at_ms <= value.created_at_ms)
+  )
+    return false
+  return ['created_at_ms', 'expires_at_ms', 'revoked_at_ms'].every(
+    (field) => typeof value[field] === 'number' && Number.isSafeInteger(value[field]) && value[field] >= 0,
+  )
+}
+
+function invalidKeyResponse(): ApiError {
+  return new ApiError(
+    502,
+    'invalid_response',
+    'The broker returned an invalid key response. Do not assume the operation failed; reconcile its public ID before retrying.',
+  )
+}
+
+export async function createAccessKey(request: CreateKeyRequest): Promise<CreateKeyResult> {
+  const result = await rpc<unknown>('/mqlite.v1.AuthService/CreateKey', request)
+  const permissions = request.permissions.includes('manage')
+    ? ['manage']
+    : ['send', 'listen'].filter((permission) => request.permissions.includes(permission))
+  if (
+    !record(result) ||
+    !keyMetadata(result.key) ||
+    typeof result.token !== 'string' ||
+    !/^mqk_[0-9a-f]{64}$/.test(result.token) ||
+    result.key.id !== request.id ||
+    result.key.name !== request.name ||
+    result.key.revoked_at_ms !== 0 ||
+    result.key.expires_at_ms !== (request.expires_at_ms ?? 0) ||
+    result.key.permissions.join(',') !== permissions.join(',')
+  ) {
+    throw invalidKeyResponse()
+  }
+  return { key: result.key, token: result.token }
+}
+
+export async function listAccessKeys(afterID = '', limit = 25): Promise<KeyPage> {
+  const result = await rpc<unknown>('/mqlite.v1.AuthService/ListKeys', { after_id: afterID, limit })
+  if (!record(result) || !Array.isArray(result.keys) || result.keys.length > limit) throw invalidKeyResponse()
+  let previous = afterID
+  for (const key of result.keys) {
+    if (!keyMetadata(key) || key.id <= previous) throw invalidKeyResponse()
+    previous = key.id
+  }
+  if (
+    result.next_after_id !== undefined &&
+    (typeof result.next_after_id !== 'string' ||
+      !result.keys.length ||
+      result.next_after_id !== previous ||
+      result.next_after_id <= afterID ||
+      result.keys.length !== limit)
+  )
+    throw invalidKeyResponse()
+  return { keys: result.keys, ...(result.next_after_id !== undefined ? { next_after_id: result.next_after_id } : {}) }
+}
+
+export async function revokeAccessKey(id: string): Promise<{ ok: boolean }> {
+  const result = await rpc<unknown>('/mqlite.v1.AuthService/RevokeKey', { id })
+  if (!record(result) || result.ok !== true) throw invalidKeyResponse()
+  return { ok: true }
 }
