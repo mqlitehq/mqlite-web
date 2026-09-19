@@ -99,7 +99,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
         </Button>
 
         <p className="mt-4 text-[11px] leading-relaxed text-faint">
-          Connect with a <span className="text-muted-foreground">manage</span> key or an administrator from{' '}
+          Connect with a <span className="text-muted-foreground">manage</span> key or an administrator token from{' '}
           <span className="text-muted-foreground">MQLITE_TOKENS</span>. The URL is remembered; the login token stays in
           this tab only.
         </p>

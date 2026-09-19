@@ -12,8 +12,15 @@ interface CreatedKey {
   key: Key
   token: string
 }
+interface SendRequest {
+  queue: string
+  messages: { body: string }[]
+  scheduled_enqueue_time_ms?: number
+}
 interface Broker {
   keys: Key[]
+  queues: string[]
+  sends: SendRequest[]
   creates: number
   revokes: number
   unsupported: boolean
@@ -29,6 +36,8 @@ interface Broker {
 async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
   const broker: Broker = {
     keys: initial,
+    queues: [],
+    sends: [],
     creates: 0,
     revokes: 0,
     unsupported: false,
@@ -82,8 +91,16 @@ async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
       key.revoked_at_ms = Date.now()
       return respond({ ok: true })
     }
-    if (path.endsWith('/ListQueues')) return respond({ queues: [] })
+    if (path.endsWith('/ListQueues')) return respond({ queues: broker.queues.map((name) => ({ name, kind: 'queue' })) })
     if (path.endsWith('/ListSubscriptions')) return respond({ subscriptions: [] })
+    if (path.endsWith('/Stats')) {
+      return respond({ queue: body.queue, active: 0, locked: 0, deferred: 0, scheduled: 0, dead_lettered: 0, total: 0, oldest_message_age_ms: 0 })
+    }
+    if (path.endsWith('/Peek')) return respond({ messages: [] })
+    if (path.endsWith('/Send')) {
+      broker.sends.push(body as SendRequest)
+      return respond({ seq_numbers: [broker.sends.length] })
+    }
     return respond({
       version: '0.3.1',
       backend: 'memory',
@@ -104,9 +121,17 @@ async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
   return broker
 }
 
+const permissionLabels: Record<string, string> = {
+  send: 'send',
+  listen: 'listen',
+  'send,listen': 'send + listen',
+  manage: 'manage',
+}
+
 async function create(page: Page, name: string, permission = 'send') {
   await page.getByRole('textbox', { name: 'key name', exact: true }).fill(name)
-  await page.getByRole('combobox', { name: 'key permissions' }).selectOption(permission)
+  await page.getByRole('combobox', { name: 'key permissions', exact: true }).click()
+  await page.getByRole('option', { name: permissionLabels[permission], exact: true }).click()
   await page.getByRole('button', { name: 'create key', exact: true }).click()
 }
 
@@ -122,6 +147,7 @@ test('creates each permission with a retained ID and a one-time secret', async (
   for (const permission of ['send', 'listen', 'send,listen', 'manage']) {
     await create(page, `fixture-${permission}`, permission)
     await expect(page.getByRole('textbox', { name: 'new access key secret' })).toHaveValue(/^mqk_[0-9a-f]{64}$/)
+    await expect(page.getByRole('combobox', { name: 'key permissions', exact: true })).toBeDisabled()
     expect(broker.retainedBeforeSend).toBe(true)
     expect(broker.keys.at(-1)?.permissions).toEqual(permission.split(','))
     expect(broker.keys.at(-1)?.id).toMatch(/^[0-9a-f]{32}$/)
@@ -130,6 +156,76 @@ test('creates each permission with a retained ID and a one-time secret', async (
     await expect(page.getByRole('textbox', { name: 'new access key secret' })).toHaveCount(0)
   }
   expect(broker.creates).toBe(4)
+})
+
+test('permission keyboard selection commits all four values without submitting the form', async ({ page }) => {
+  const broker = await setup(page)
+  const select = page.getByRole('combobox', { name: 'key permissions', exact: true })
+  const list = page.getByRole('listbox', { name: 'Key permissions', exact: true })
+  for (const [index, permission] of ['send', 'listen', 'send,listen', 'manage'].entries()) {
+    await page.getByRole('textbox', { name: 'key name', exact: true }).fill(`keyboard-${index}`)
+    await select.focus()
+    await page.keyboard.press('Home')
+    await expect(list).toBeVisible()
+    if (index === 3) {
+      await page.keyboard.press('End')
+    } else {
+      for (let step = 0; step < index; step++) await page.keyboard.press('ArrowDown')
+    }
+    await page.keyboard.press('Enter')
+    await expect(list).toHaveCount(0)
+    await expect(select).toBeFocused()
+    expect(broker.creates).toBe(index)
+    await page.getByRole('button', { name: 'create key', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+    expect(broker.keys.at(-1)?.permissions).toEqual(permission.split(','))
+    await expect(select).toBeDisabled()
+    await page.getByRole('button', { name: 'I saved the secret', exact: true }).click()
+    await expect(select).toBeEnabled()
+  }
+})
+
+test('permission menu has a dark surface, fits mobile, and dismisses uncommitted choices', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const broker = await setup(page)
+  const select = page.getByRole('combobox', { name: 'key permissions', exact: true })
+  const list = page.getByRole('listbox', { name: 'Key permissions', exact: true })
+  await expect(page.locator('select[aria-label="key permissions"]')).toHaveCount(0)
+  await select.click()
+  await expect(list.getByRole('option')).toHaveCount(4)
+  for (const label of Object.values(permissionLabels)) {
+    await expect(list.getByRole('option', { name: label, exact: true })).toBeVisible()
+  }
+  const surface = await list.evaluate((node) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d')!
+    context.fillStyle = getComputedStyle(node).backgroundColor
+    context.fillRect(0, 0, 1, 1)
+    return [...context.getImageData(0, 0, 1, 1).data]
+  })
+  expect(surface[3]).toBe(255)
+  expect(Math.max(...surface.slice(0, 3))).toBeLessThan(100)
+  const bounds = await list.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
+  expect(bounds!.y).toBeGreaterThanOrEqual(0)
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844)
+  await page.keyboard.press('End')
+  await page.keyboard.press('Escape')
+  await expect(list).toHaveCount(0)
+  await expect(select).toBeFocused()
+  await select.click()
+  await expect(list.getByRole('option', { name: 'send', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('ArrowDown')
+  await page.getByRole('heading', { name: 'access keys', exact: true }).click()
+  await expect(list).toHaveCount(0)
+  await select.click()
+  await expect(list.getByRole('option', { name: 'send', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Tab')
+  await expect(list).toHaveCount(0)
+  expect(broker.creates).toBe(0)
 })
 
 test('reload loses the secret but preserves its public ID for exact reconciliation', async ({ page }) => {
@@ -162,6 +258,7 @@ test('lost creation response is not retried and keeps the exact public ID', asyn
   await expect(page.getByText('unknown', { exact: true })).toBeVisible()
   expect(broker.creates).toBe(1)
   await expect(page.getByRole('button', { name: 'create key', exact: true })).toBeDisabled()
+  await expect(page.getByRole('combobox', { name: 'key permissions', exact: true })).toBeDisabled()
   await expect(page.getByTestId('pending-key-id')).toHaveText(broker.keys[0].id)
   await page.getByRole('button', { name: 'check request ID' }).click()
   await expect(page.getByText(/Found this exact request ID: active/)).toBeVisible()
@@ -366,12 +463,222 @@ test('authentication-off broker cannot issue keys from the console', async ({ pa
 
 test('expiry validates a future instant and displays the created expiry', async ({ page }) => {
   const broker = await setup(page)
-  await page.getByRole('textbox', { name: 'key expiry', exact: true }).fill('2000-01-01T00:00')
+  await page.getByRole('textbox', { name: 'key expiry', exact: true }).fill('2000-01-01 00:00')
   await create(page, 'expired-input')
   await expect(page.getByRole('alert')).toContainText('future expiry')
   expect(broker.creates).toBe(0)
-  await page.getByRole('textbox', { name: 'key expiry', exact: true }).fill('2099-01-01T00:00')
+  await page.getByRole('textbox', { name: 'key expiry', exact: true }).fill('2099-01-01 00:00')
   await page.getByRole('button', { name: 'create key', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
   expect(broker.keys[0].expires_at_ms).toBeGreaterThan(Date.now())
+})
+
+for (const locale of ['zh-CN', 'en-US']) {
+  test.describe(`English dates with browser locale ${locale}`, () => {
+    test.use({ locale, timezoneId: 'Asia/Shanghai' })
+
+    test('keeps input, calendar, and key timestamps in a fixed format', async ({ page }) => {
+      const broker = await setup(page, [{
+        ...validListKey,
+        name: 'formatted-key',
+        created_at_ms: Date.UTC(2026, 8, 20, 1, 2, 3),
+        expires_at_ms: Date.UTC(2099, 0, 2, 3, 4, 5),
+      }])
+      await expect(page.getByRole('heading', { name: 'managed keys', exact: true })).toBeVisible()
+      await expect(page.getByText(/Administrator tokens in MQLITE_TOKENS are not listed here/)).toContainText('restart the broker')
+      const row = page.getByRole('row').filter({ hasText: 'formatted-key' })
+      await expect(row).toContainText('2026-09-20 09:02:03')
+      await expect(row).toContainText('2099-01-02 11:04:05')
+      const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
+      await expect(expiry).toHaveAttribute('placeholder', 'yyyy-MM-dd HH:mm')
+      await expiry.fill('2096-02-29 14:05')
+      await page.getByRole('button', { name: 'Choose date and time', exact: true }).click()
+      const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+      await expect(picker).toContainText('February 2096')
+      for (const weekday of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) {
+        await expect(picker.getByText(weekday, { exact: true })).toBeVisible()
+      }
+      await expect(picker.getByRole('button', { name: 'February 29, 2096', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.locator('input[type="datetime-local"], input[type="date"], input[type="time"]')).toHaveCount(0)
+      await picker.getByRole('button', { name: 'Apply', exact: true }).click()
+      await expect(expiry).toHaveValue('2096-02-29 14:05')
+      await create(page, `locale-${locale}`)
+      await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+      expect(broker.keys.at(-1)?.expires_at_ms).toBe(Date.UTC(2096, 1, 29, 6, 5))
+      await page.getByRole('button', { name: 'I saved the secret', exact: true }).click()
+      await expect(page.getByRole('row').filter({ hasText: `locale-${locale}` })).toContainText('2096-02-29 14:05:00')
+    })
+  })
+}
+
+test.describe('local date and time entry', () => {
+  test.use({ locale: 'zh-CN', timezoneId: 'Asia/Shanghai' })
+
+  test('rejects malformed and impossible dates before creating a key', async ({ page }) => {
+    const broker = await setup(page)
+    await page.getByRole('textbox', { name: 'key name', exact: true }).fill('invalid-date')
+    const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
+    for (const value of [
+      '2099-02-29 12:00', '2100-02-29 12:00', '2099-04-31 12:00',
+      '2099-00-01 12:00', '2099-13-01 12:00', '2099-01-00 12:00', '2099-01-32 12:00',
+      '2099-01-01 24:00', '2099-01-01 12:60', '2099-01-01 12:00:00',
+      '2099/01/01 12:00', '2099-01-01', '0000-01-01 12:00',
+    ]) {
+      await expiry.fill(value)
+      await page.getByRole('button', { name: 'create key', exact: true }).click()
+      await expect(page.getByRole('alert')).toContainText('future expiry')
+      expect(broker.creates, value).toBe(0)
+      expect(broker.keys, value).toHaveLength(0)
+    }
+    await expiry.fill('')
+    await page.getByRole('button', { name: 'create key', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+    expect(broker.keys[0].expires_at_ms).toBe(0)
+  })
+
+  test('calendar selection crosses a year boundary and submits the chosen local instant', async ({ page }) => {
+    const broker = await setup(page)
+    const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
+    await expiry.fill('2098-12-31 00:00')
+    await page.getByRole('button', { name: 'Choose date and time', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+    await picker.getByRole('button', { name: 'Next month', exact: true }).click()
+    await expect(picker).toContainText('January 2099')
+    await picker.getByRole('button', { name: 'Previous month', exact: true }).click()
+    await expect(picker).toContainText('December 2098')
+    await picker.getByRole('button', { name: 'Next month', exact: true }).click()
+    await picker.getByRole('button', { name: 'January 2, 2099', exact: true }).click()
+    await picker.getByRole('textbox', { name: 'Hour', exact: true }).fill('23')
+    await picker.getByRole('textbox', { name: 'Minute', exact: true }).fill('07')
+    await expect(expiry).toHaveValue('2098-12-31 00:00')
+    await page.keyboard.press('Enter')
+    await expect(expiry).toHaveValue('2099-01-02 23:07')
+    await expect(picker).toHaveCount(0)
+    expect(broker.creates).toBe(0)
+    await create(page, 'calendar-selection')
+    await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+    expect(broker.keys[0].expires_at_ms).toBe(Date.UTC(2099, 0, 2, 15, 7))
+  })
+
+  test('calendar validates time, cancels pending edits, restores focus, and clears expiry', async ({ page }) => {
+    const broker = await setup(page)
+    const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
+    const trigger = page.getByRole('button', { name: 'Choose date and time', exact: true })
+    const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+    await expiry.fill('2099-01-02 10:30')
+    await trigger.click()
+    await picker.getByRole('textbox', { name: 'Hour', exact: true }).fill('24')
+    await expect(picker.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled()
+    await expect(picker.getByRole('alert')).toContainText('valid local date and time')
+    await page.keyboard.press('Enter')
+    await expect(picker).toBeVisible()
+    expect(broker.creates).toBe(0)
+    await page.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+    await expect(expiry).toHaveValue('2099-01-02 10:30')
+    await trigger.click()
+    await expect(picker.getByRole('textbox', { name: 'Hour', exact: true })).toHaveValue('10')
+    await picker.getByRole('button', { name: 'January 3, 2099', exact: true }).click()
+    await page.getByRole('heading', { name: 'access keys', exact: true }).click()
+    await expect(picker).toHaveCount(0)
+    await expect(expiry).toHaveValue('2099-01-02 10:30')
+    await trigger.click()
+    await picker.getByRole('button', { name: 'Clear', exact: true }).click()
+    await expect(expiry).toHaveValue('')
+    await expect(trigger).toBeFocused()
+    await create(page, 'cleared-expiry')
+    await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+    expect(broker.keys[0].expires_at_ms).toBe(0)
+  })
+
+  test('calendar keyboard navigation crosses month boundaries', async ({ page }) => {
+    await setup(page)
+    const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
+    await expiry.fill('2096-02-29 10:30')
+    await page.getByRole('button', { name: 'Choose date and time', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+    await expect(picker.getByRole('button', { name: 'February 29, 2096', exact: true })).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect(picker.getByRole('button', { name: 'March 1, 2096', exact: true })).toBeFocused()
+    await page.keyboard.press('ArrowLeft')
+    await expect(picker.getByRole('button', { name: 'February 29, 2096', exact: true })).toBeFocused()
+    await picker.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(expiry).toHaveValue('2096-02-29 10:30')
+  })
+
+  test('calendar stays inside a narrow mobile viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await setup(page)
+    await page.getByRole('textbox', { name: 'key expiry', exact: true }).fill('2099-01-02 10:30')
+    await page.getByRole('button', { name: 'Choose date and time', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+    await expect(picker.getByRole('button', { name: 'Apply', exact: true })).toBeInViewport()
+    const bounds = await picker.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
+    expect(bounds!.y).toBeGreaterThanOrEqual(0)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844)
+    await picker.getByRole('button', { name: 'January 3, 2099', exact: true }).click()
+    await picker.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'key expiry', exact: true })).toHaveValue('2099-01-03 10:30')
+  })
+
+  test('message scheduling rejects invalid input and preserves scheduled and immediate sends', async ({ page }) => {
+    const broker = await setup(page)
+    broker.queues = ['schedule-fixture']
+    await page.getByRole('button', { name: 'queues', exact: true }).click()
+    await page.getByRole('row').filter({ hasText: 'schedule-fixture' }).click()
+    await page.getByRole('button', { name: '+ send', exact: true }).click()
+    const schedule = page.getByRole('textbox', { name: 'schedule for', exact: true })
+    await expect(schedule).toHaveAttribute('placeholder', 'yyyy-MM-dd HH:mm')
+    for (const value of ['2099-02-29 10:00', '2099-01-01 24:00', '2000-01-01 00:00', 'invalid']) {
+      await schedule.fill(value)
+      await page.getByRole('button', { name: /^(send|schedule)$/, exact: true }).click()
+      await expect(page.getByRole('alert')).toContainText('valid future schedule')
+      expect(broker.sends, value).toHaveLength(0)
+    }
+    await schedule.fill('2099-01-02 10:30')
+    await page.getByRole('button', { name: 'Choose date and time', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+    await expect(picker).toContainText('January 2099')
+    await picker.getByRole('button', { name: 'January 3, 2099', exact: true }).click()
+    await picker.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(page.locator('input[type="datetime-local"], input[type="date"], input[type="time"]')).toHaveCount(0)
+    await page.getByRole('button', { name: 'schedule', exact: true }).click()
+    await expect(page.getByText('✓ scheduled seq 1', { exact: true })).toBeVisible()
+    expect(broker.sends).toHaveLength(1)
+    expect(broker.sends[0]).toEqual({ queue: 'schedule-fixture', messages: [{ body: '' }], scheduled_enqueue_time_ms: Date.UTC(2099, 0, 3, 2, 30) })
+    await schedule.fill('')
+    await page.getByRole('button', { name: 'send', exact: true }).click()
+    await expect(page.getByText('✓ sent seq 2', { exact: true })).toBeVisible()
+    expect(broker.sends).toHaveLength(2)
+    expect(broker.sends[1]).toEqual({ queue: 'schedule-fixture', messages: [{ body: '' }] })
+  })
+})
+
+test.describe('daylight saving transitions', () => {
+  test.use({ locale: 'en-US', timezoneId: 'America/New_York' })
+
+  test('rejects a nonexistent local time and accepts the following valid instant', async ({ page }) => {
+    const broker = await setup(page)
+    // On this second Sunday in March, 02:30 normalizes to 03:30 in this timezone.
+    expect(await page.evaluate(() => new Date(2099, 2, 8, 2, 30).getHours())).toBe(3)
+    const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
+    await expiry.fill('2099-03-08 02:30')
+    await create(page, 'dst-gap')
+    await expect(page.getByRole('alert')).toContainText('future expiry')
+    expect(broker.creates).toBe(0)
+    await expiry.fill('2099-03-08 03:30')
+    await page.getByRole('button', { name: 'Choose date and time', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: 'Choose date and time', exact: true })
+    await picker.getByRole('textbox', { name: 'Hour', exact: true }).fill('02')
+    await expect(picker.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled()
+    await picker.getByRole('textbox', { name: 'Hour', exact: true }).fill('03')
+    await picker.getByRole('button', { name: 'Apply', exact: true }).click()
+    await page.getByRole('button', { name: 'create key', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+    expect(broker.keys[0].expires_at_ms).toBe(Date.UTC(2099, 2, 8, 7, 30))
+  })
 })

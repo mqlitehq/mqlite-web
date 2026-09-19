@@ -10,7 +10,10 @@ import {
 } from '../lib/access-keys.js'
 import type { AccessKey, CreateKeyResult, KeyPage } from '../lib/types.js'
 import { fmtTime } from '../lib/format.js'
-import { Badge, Button, Card, Empty, ErrorBanner, Input, PageHeader, Select, Spinner } from '../components/ui.js'
+import { parseDateTime } from '../lib/date-time.js'
+import { DateTimeField } from '../components/date-time-field.js'
+import { PermissionSelect } from '../components/permission-select.js'
+import { Badge, Button, Card, Empty, ErrorBanner, Input, PageHeader, Spinner } from '../components/ui.js'
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 403) {
@@ -102,9 +105,9 @@ export function AccessKeys() {
       setError('Use a name of 1–128 UTF-8 bytes, without NUL characters.')
       return
     }
-    const expiresAt = expiry ? new Date(expiry).getTime() : 0
+    const expiresAt = parseDateTime(expiry)
     if (expiry && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
-      setError('Choose a future expiry, or leave it empty for no expiry.')
+      setError('Choose a valid future expiry in yyyy-MM-dd HH:mm format, or leave it empty for no expiry.')
       return
     }
     creatingRef.current = true
@@ -238,8 +241,9 @@ export function AccessKeys() {
         }
       />
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Permissions apply across this broker. Manage includes send, listen, and issuing or revoking any database key.
-        Configured administrator tokens stay in deployment configuration and are not listed here.
+        Permissions apply across this broker. Manage includes send, listen, and issuing or revoking any managed key.
+        Administrator tokens in MQLITE_TOKENS are not listed here; update the configuration and restart the broker
+        to change them.
       </p>
       {error && <ErrorBanner message={error} />}
       {storageError && <ErrorBanner message={storageError} />}
@@ -360,34 +364,28 @@ export function AccessKeys() {
                   disabled={!!pending || creating}
                 />
               </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                permissions
-                <Select
-                  aria-label="key permissions"
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <span>permissions</span>
+                <PermissionSelect
                   value={permissions}
-                  onChange={(event) => setPermissions(event.target.value)}
-                  disabled={!!pending || creating}
-                >
-                  <option value="send">send — publish and schedule</option>
-                  <option value="listen">listen — consume and settle</option>
-                  <option value="send,listen">send + listen</option>
-                  <option value="manage">manage — full administration</option>
-                </Select>
-              </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                expiry (local time, optional)
-                <Input
-                  aria-label="key expiry"
-                  type="datetime-local"
-                  value={expiry}
-                  onChange={(event) => setExpiry(event.target.value)}
+                  onChange={setPermissions}
                   disabled={!!pending || creating}
                 />
-              </label>
+              </div>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <label htmlFor="key-expiry">expiry (local time, optional)</label>
+                <DateTimeField
+                  id="key-expiry"
+                  aria-label="key expiry"
+                  value={expiry}
+                  onChange={setExpiry}
+                  disabled={!!pending || creating}
+                />
+              </div>
             </div>
             {permissions === 'manage' && (
               <p className="text-xs text-warn">
-                A manage key can issue other administrator keys and revoke any database key, including yours.
+                A manage key can issue other administrator keys and revoke any managed key, including yours.
               </p>
             )}
             <div className="flex flex-wrap items-center gap-3">
@@ -407,7 +405,7 @@ export function AccessKeys() {
       {!unsupported && (
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">database keys</h2>
+            <h2 className="text-sm font-semibold">managed keys</h2>
             <span className="text-xs text-faint">25 per page · ordered by ID</span>
           </div>
           {loading ? (

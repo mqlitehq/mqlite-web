@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { send } from '../lib/api'
 import { Button, Card, ErrorBanner, Input, Label, Select, Textarea } from './ui'
 import { KVEditor, kvRecord, type KV } from './KVEditor'
-import { DateTimeField, parseDateTime } from './DateTimeField'
+import { DateTimeField } from './date-time-field.js'
+import { parseDateTime } from '../lib/date-time.js'
 
 // Publish to a topic — fans out to every subscription whose filter matches. Properties are
 // entered as key/value rows because filters routinely key off them (`properties["tier"]`).
@@ -99,7 +100,7 @@ export function SendPanel({ queue, onClose, onSent }: { queue: string; onClose: 
   const [props, setProps] = useState<KV[]>([])
   const [ttl, setTtl] = useState('')
   const [ttlUnit, setTtlUnit] = useState(String(60_000))
-  const [scheduleAt, setScheduleAt] = useState('') // datetime-local; blank = send now
+  const [scheduleAt, setScheduleAt] = useState('') // local yyyy-MM-dd HH:mm; blank = send now
   const [more, setMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -109,12 +110,16 @@ export function SendPanel({ queue, onClose, onSent }: { queue: string; onClose: 
 
   async function submit() {
     if (busy) return
+    const scheduledEnqueueTimeMs = parseDateTime(scheduleAt)
+    if (scheduleAt && (!Number.isFinite(scheduledEnqueueTimeMs) || scheduledEnqueueTimeMs <= Date.now())) {
+      setErr('Choose a valid future schedule in yyyy-MM-dd HH:mm format, or leave it empty to send now.')
+      return
+    }
     setBusy(true)
     setErr('')
     setOk('')
     const properties = kvRecord(props)
     const ttlMs = Number(ttl) > 0 ? Number(ttl) * Number(ttlUnit) : 0
-    const scheduledEnqueueTimeMs = parseDateTime(scheduleAt)
     try {
       const seqs = await send(queue, {
         bodyText: body,
@@ -163,7 +168,7 @@ export function SendPanel({ queue, onClose, onSent }: { queue: string; onClose: 
       <div className="mt-3 grid grid-cols-2 gap-3">
         <div>
           <Label>schedule for (optional — blank = send now)</Label>
-          <DateTimeField value={scheduleAt} onChange={setScheduleAt} />
+          <DateTimeField aria-label="schedule for" value={scheduleAt} onChange={setScheduleAt} disabled={busy} />
         </div>
         <div>
           <Label>time-to-live (optional — capped by queue default)</Label>

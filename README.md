@@ -41,7 +41,7 @@ npm run build      # → dist/  (static, path-relative, ~80 kB gzipped JS)
 
 ## Auth
 
-Log in with a `manage` database key or one of the broker's configured
+Log in with a managed key with `manage` permission or one of the broker's configured
 `MQLITE_TOKENS` administrators. Send/listen keys are for applications and receive a
 clear administrator requirement at console login. The login token is kept in
 `sessionStorage` (this tab only) and sent as `Authorization: Bearer …` on every call;
@@ -65,6 +65,15 @@ manager. New tokens use `mqk_` plus 64 lowercase hexadecimal characters (256 ran
 bits). The console never persists issued secrets or logs them. The broker stores
 only their SHA-256 digests. Configured administrator tokens are not listed and
 cannot be revoked through this page.
+
+The **managed keys** list contains access keys created at runtime. Configured
+administrator tokens in `MQLITE_TOKENS` are managed through broker configuration;
+change the configuration and restart the broker to update or remove them.
+
+Expiry and scheduled delivery use local time in `yyyy-MM-dd HH:mm` format. Their
+calendar controls stay in English regardless of browser language, and listed
+timestamps use `yyyy-MM-dd HH:mm:ss`. Invalid dates are rejected rather than
+silently shifted to a different day or time.
 
 A public 32-hex ID is generated with browser `crypto.getRandomValues` and retained
 in this tab **before** creation is sent. If storage or randomness is unavailable,
