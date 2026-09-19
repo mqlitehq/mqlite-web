@@ -31,7 +31,7 @@ export function Docs({ onOpenKeys }: { onOpenKeys: () => void }) {
           never retries creation automatically.
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Database keys may expire or be revoked; configured tokens are managed through deployment configuration.
+          Managed keys may expire or be revoked; configured tokens are managed through deployment configuration.
           Restoring an old database backup can restore keys that were revoked later: audit and rotate them before
           reopening access. Existing v0.3.0 brokers keep their original queue tools; managed keys require v0.3.1 or
           later.
