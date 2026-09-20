@@ -13,7 +13,9 @@ export function ProcessObservation() {
   const effects = s.messages.filter((r) => r.count > 0)
   const unexpected = (s.queues ?? []).reduce((n, q) => n + q.unexpected, 0)
   const requests = s.http.requests.filter((r) => r.code !== 'ok').reduce((n, r) => n + r.count, 0)
-  const storage = s.storage.operations.filter((r) => r.outcome !== 'ok').reduce((n, r) => n + r.duration.count, 0)
+  const storage = s.storage.operations
+    .filter((r) => r.outcome === 'error' || r.outcome === 'outcome_unknown')
+    .reduce((n, r) => n + r.duration.count, 0)
   const failures = s.maintenance.reduce((n, r) => n + r.failures, 0)
   const filters = s.filters.reduce((n, r) => n + r.count, 0)
   const number = (n: number) => (current ? fmtNum(n) : 'unknown')

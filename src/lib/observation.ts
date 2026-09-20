@@ -120,6 +120,112 @@ function uniqueRows(value: unknown, keys: string[], required: string[] = []): bo
   return required.every((label) => value.some((row) => record(row) && row[keys[0]] === label))
 }
 
+// These finite domains mirror the canonical broker vocabulary. A missing row
+// means unknown, including before the first event; it must not become a zero.
+const messageEvents = [
+  'enqueued',
+  'scheduled',
+  'deduplicated',
+  'dedup_conflict',
+  'delivered',
+  'redelivered',
+  'completed',
+  'receive_deleted',
+  'abandoned',
+  'deferred',
+  'rejected',
+  'dead_lettered',
+  'ttl_discarded',
+  'retention_deleted',
+  'purged',
+  'canceled',
+  'redriven',
+  'lock_expired',
+  'recovered',
+  'activated',
+]
+const storageDimensions = ['read', 'write', 'transaction'].flatMap((operation) => [
+  [operation, 'ok', ''],
+  [operation, 'rejected', 'application'],
+  [operation, 'outcome_unknown', 'outcome_unknown'],
+  ...['canceled', 'closed', 'busy', 'connection', 'full', 'corrupt', 'io', 'other'].map((code) => [
+    operation,
+    'error',
+    code,
+  ]),
+])
+const requestRPCs = [
+  ...[
+    'Send',
+    'Receive',
+    'Complete',
+    'CompleteBatch',
+    'RenewBatch',
+    'Abandon',
+    'Reject',
+    'Defer',
+    'ReceiveDeferred',
+    'Renew',
+    'Schedule',
+    'Cancel',
+    'Peek',
+    'Stats',
+  ].map((name) => `QueueService/${name}`),
+  ...[
+    'CreateQueue',
+    'Subscribe',
+    'ListQueues',
+    'ListSubscriptions',
+    'TestFilter',
+    'Redrive',
+    'Purge',
+    'Status',
+    'Observe',
+  ].map((name) => `AdminService/${name}`),
+  ...['CreateKey', 'ListKeys', 'RevokeKey'].map((name) => `AuthService/${name}`),
+]
+const requestCodes = [
+  'ok',
+  'unauthenticated',
+  'permission_denied',
+  'key_conflict',
+  'not_found',
+  'already_exists',
+  'name_conflict',
+  'group_required',
+  'invalid_argument',
+  'message_too_large',
+  'outcome_unknown',
+  'canceled',
+  'internal',
+  'lock_lost',
+  'unimplemented',
+]
+
+function completeCounters(snapshot: Observation): boolean {
+  const storage = new Set(
+    snapshot.storage.operations.map((r) => JSON.stringify([r.operation, r.outcome, r.error_code])),
+  )
+  if (!storageDimensions.every((dimension) => storage.has(JSON.stringify(dimension)))) return false
+  if (snapshot.http.state === 'available') {
+    const requests = new Set(snapshot.http.requests.map((r) => JSON.stringify([r.rpc, r.code])))
+    if (!requestRPCs.every((rpc) => requestCodes.every((code) => requests.has(JSON.stringify([rpc, code])))))
+      return false
+  } else if (
+    snapshot.http.requests.length ||
+    snapshot.http.authentication.length ||
+    snapshot.http.handler_latency.length
+  ) {
+    return false
+  }
+  const events = new Map((snapshot.queues ?? []).map((q) => [q.queue, new Set<string>()]))
+  for (const row of snapshot.messages) {
+    if (!events.has(row.queue)) events.set(row.queue, new Set())
+    events.get(row.queue)!.add(row.event)
+  }
+  return [...events.values()].every((present) => messageEvents.every((event) => present.has(event)))
+}
+
 // Reject missing or malformed domains; HTTP 200 alone is not a healthy sample.
 // Unknown fields remain forward compatible with newer brokers.
 export function isObservation(value: unknown): value is Observation {
@@ -237,7 +343,8 @@ export function isObservation(value: unknown): value is Observation {
           count: r.count,
           sum_seconds: r.sum_seconds,
         }),
-    )
+    ) &&
+    completeCounters(value as unknown as Observation)
   )
 }
 

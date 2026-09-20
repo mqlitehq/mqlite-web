@@ -51,7 +51,7 @@ function sample(access: Observation['access'] = 'manage'): Observation {
     storage: {
       operations: [
         {
-          operation: 'query',
+          operation: 'read',
           outcome: 'error',
           error_code: 'connection',
           retries: 2,
@@ -106,6 +106,110 @@ function sample(access: Observation['access'] = 'manage'): Observation {
   }
   for (const outcome of ['success', 'missing', 'invalid', 'expired', 'revoked', 'backend_error']) {
     snapshot.http.authentication.push({ outcome, count: 0 })
+  }
+  for (const queue of ['orders', 'emails']) {
+    for (const event of [
+      'enqueued',
+      'scheduled',
+      'deduplicated',
+      'dedup_conflict',
+      'delivered',
+      'redelivered',
+      'completed',
+      'receive_deleted',
+      'abandoned',
+      'deferred',
+      'rejected',
+      'dead_lettered',
+      'ttl_discarded',
+      'retention_deleted',
+      'purged',
+      'canceled',
+      'redriven',
+      'lock_expired',
+      'recovered',
+      'activated',
+    ]) {
+      if (!snapshot.messages.some((row) => row.queue === queue && row.event === event))
+        snapshot.messages.push({ queue, event, count: 0 })
+    }
+  }
+  for (const operation of ['read', 'write', 'transaction']) {
+    const outcomes = [
+      ['ok', ''],
+      ['rejected', 'application'],
+      ['outcome_unknown', 'outcome_unknown'],
+      ...['canceled', 'closed', 'busy', 'connection', 'full', 'corrupt', 'io', 'other'].map((code) => ['error', code]),
+    ]
+    for (const [outcome, error_code] of outcomes) {
+      if (
+        !snapshot.storage.operations.some(
+          (r) => r.operation === operation && r.outcome === outcome && r.error_code === error_code,
+        )
+      )
+        snapshot.storage.operations.push({
+          operation,
+          outcome,
+          error_code,
+          retries: 0,
+          duration: { bounds_seconds: [1], bucket_counts: [0], count: 0, sum_seconds: 0 },
+        })
+    }
+  }
+  const services = {
+    QueueService: [
+      'Send',
+      'Receive',
+      'Complete',
+      'CompleteBatch',
+      'RenewBatch',
+      'Abandon',
+      'Reject',
+      'Defer',
+      'ReceiveDeferred',
+      'Renew',
+      'Schedule',
+      'Cancel',
+      'Peek',
+      'Stats',
+    ],
+    AdminService: [
+      'CreateQueue',
+      'Subscribe',
+      'ListQueues',
+      'ListSubscriptions',
+      'TestFilter',
+      'Redrive',
+      'Purge',
+      'Status',
+      'Observe',
+    ],
+    AuthService: ['CreateKey', 'ListKeys', 'RevokeKey'],
+  }
+  for (const [service, methods] of Object.entries(services)) {
+    for (const method of methods) {
+      const rpc = `${service}/${method}`
+      for (const code of [
+        'ok',
+        'unauthenticated',
+        'permission_denied',
+        'key_conflict',
+        'not_found',
+        'already_exists',
+        'name_conflict',
+        'group_required',
+        'invalid_argument',
+        'message_too_large',
+        'outcome_unknown',
+        'canceled',
+        'internal',
+        'lock_lost',
+        'unimplemented',
+      ]) {
+        if (!snapshot.http.requests.some((r) => r.rpc === rpc && r.code === code))
+          snapshot.http.requests.push({ rpc, code, count: 0, duration_seconds: 0 })
+      }
+    }
   }
   return snapshot
 }
@@ -388,6 +492,9 @@ test('canonical domain labels stay unique, nonempty and forward compatible', () 
   snapshot.maintenance.push({ ...snapshot.maintenance[0], task: 'future-task' })
   snapshot.filters.push({ stage: 'future-stage', count: 0 })
   snapshot.http.authentication.push({ outcome: 'future-outcome', count: 0 })
+  snapshot.messages.push({ queue: 'orders', event: 'future-event', count: 0 })
+  snapshot.storage.operations.push({ ...snapshot.storage.operations[0], operation: 'future-operation' })
+  snapshot.http.requests.push({ rpc: 'FutureService/Read', code: 'future-code', count: 0, duration_seconds: 0 })
   expect(isObservation(snapshot)).toBe(true)
   for (const corrupt of [
     (s: Observation) => {
@@ -413,4 +520,86 @@ test('canonical domain labels stay unique, nonempty and forward compatible', () 
     corrupt(copy)
     expect(isObservation(copy)).toBe(false)
   }
+})
+
+test('every required counter row is present before zero can be interpreted', () => {
+  const valid = sample()
+  expect(valid.storage.operations).toHaveLength(33)
+  expect(valid.http.requests).toHaveLength(390)
+  expect(valid.messages).toHaveLength(40)
+  const domains = (s: Observation) => [
+    s.storage.operations,
+    s.http.requests,
+    s.messages,
+    s.maintenance,
+    s.filters,
+    s.http.authentication,
+  ]
+  for (const [domain, rows] of domains(valid).entries()) {
+    for (const index of rows.keys()) {
+      const copy = structuredClone(valid)
+      domains(copy)[domain].splice(index, 1)
+      expect(isObservation(copy), `missing domain ${domain} row ${index}`).toBe(false)
+    }
+  }
+  const withoutEvents = sample()
+  withoutEvents.messages = withoutEvents.messages.filter((r) => r.queue !== 'emails')
+  expect(isObservation(withoutEvents)).toBe(false)
+  const empty = sample('embedded')
+  empty.queues = []
+  empty.queue_count = 0
+  empty.subscription_count = 0
+  empty.messages = []
+  empty.http = { state: 'not_applicable', requests: [], authentication: [], handler_latency: [] }
+  expect(isObservation(empty)).toBe(true)
+  empty.http.requests.push(valid.http.requests[0])
+  expect(isObservation(empty)).toBe(false)
+  const partial = sample()
+  partial.queues = null
+  partial.collection.state = 'unavailable'
+  partial.collection.error_code = 'connection'
+  expect(isObservation(partial)).toBe(true)
+  partial.messages.splice(0, 1)
+  expect(isObservation(partial)).toBe(false)
+})
+
+for (const domain of ['storage', 'requests', 'messages'] as const) {
+  test(`empty ${domain} counters show unknown instead of a healthy zero`, async ({ page }) => {
+    const broker = await setup(page)
+    const snapshot = sample()
+    if (domain === 'storage') snapshot.storage.operations = []
+    else if (domain === 'requests') snapshot.http.requests = []
+    else snapshot.messages = []
+    broker.observation = snapshot
+    await page.goto('/')
+    await expect(stat(page, 'total')).toContainText('unknown')
+    await expect(page.getByText('Process counters are unknown.')).toBeVisible()
+    expect(broker.calls.some((path) => path.endsWith('/Stats'))).toBe(false)
+  })
+}
+
+test('application rejections do not count as storage failures; errors and unknown outcomes do', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  for (const row of snapshot.storage.operations) {
+    const count = row.outcome === 'rejected' ? 7 : 0
+    row.duration = { bounds_seconds: [1], bucket_counts: [count], count, sum_seconds: count / 100 }
+  }
+  broker.observation = snapshot
+  await page.goto('/')
+  await expect(stat(page, 'storage errors')).toContainText('0')
+  snapshot.storage.operations.find((r) => r.operation === 'read' && r.error_code === 'connection')!.duration = {
+    bounds_seconds: [1],
+    bucket_counts: [2],
+    count: 2,
+    sum_seconds: 0.02,
+  }
+  snapshot.storage.operations.find((r) => r.operation === 'write' && r.outcome === 'outcome_unknown')!.duration = {
+    bounds_seconds: [1],
+    bucket_counts: [3],
+    count: 3,
+    sum_seconds: 0.03,
+  }
+  await page.getByRole('button', { name: 'refresh', exact: true }).click()
+  await expect(stat(page, 'storage errors')).toContainText('5')
 })
