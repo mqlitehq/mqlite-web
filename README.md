@@ -36,7 +36,7 @@ MQLITE_TOKENS=mqk_dev MQLITE_DB=file:./mq.db mqlite serve --addr :6754
 ## Build
 
 ```bash
-npm run build      # → dist/  (static, path-relative, ~80 kB gzipped JS)
+npm run build      # → dist/  (static, path-relative, ~100 kB gzipped JS)
 ```
 
 ## Auth
@@ -94,17 +94,27 @@ Rotate by creating a replacement, switching clients, and revoking the old key.
 Backups contain key state; restoring an older backup can re-enable credentials
 revoked afterward, so audit and rotate keys before reopening access.
 
-## Integrating with the broker (deferred)
+## Integrating with the broker
 
-`dist/` is static and path-relative (`base: './'`), so it embeds at any mount point.
-Two options (the same artifact works for both):
+The broker embeds the built console at `/ui/`. This repository remains the source
+of the console; the broker repository tracks a copy of the complete `dist/` output
+in `server/web/` for `go:embed`.
 
-1. **Go embed** — `go:embed` the built `dist/` into the broker binary and serve it
-   (e.g. at `/ui/`). One self-contained binary, no extra assets to ship.
-2. **Container stage** — copy `dist/` into the broker image during the docker build.
+After console changes are merged, build that revision and replace the broker's
+`server/web/` contents with the complete `dist/` output, including
+`THIRD_PARTY_NOTICES.txt`. Remove obsolete hashed assets, then build and test the
+broker before merging its asset update. Do not edit generated assets directly.
 
-Embedding is intentionally **not wired yet** — the standalone console is finalized first,
-then merged into the broker.
+The build is static and path-relative (`base: './'`), so the same output also works
+on a static host or in a container. Keep its directory structure and license
+notices intact.
+
+## License
+
+The console is released under the [MIT license](LICENSE). Bundled libraries and
+the Geist Mono font retain their own licenses; their full notices are in
+[`public/THIRD_PARTY_NOTICES.txt`](public/THIRD_PARTY_NOTICES.txt), which Vite copies
+into every build. The font is licensed under SIL OFL 1.1.
 
 ## Stack
 
