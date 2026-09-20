@@ -1,6 +1,6 @@
 // One source of truth for the subscription-filter (expr) reference, rendered two ways:
 // a human panel (FilterReference) and a plain-text block for an AI (filterRefText).
-// Mirrors mqlite/docs/filters.md; every example here is verified against the broker.
+// Mirrors mqlite/docs/concepts.html; every example here is verified against the broker.
 
 export interface RefRow {
   expr: string
@@ -86,7 +86,9 @@ export const FILTER_REF: RefSection[] = [
   },
   {
     title: 'Durations & time',
-    intro: 'enqueued_at and visible_at are the message’s own timestamps (UTC). Subtract for a duration.',
+    intro:
+      'enqueued_at and visible_at are the message’s own timestamps (UTC). Subtract for a duration. ' +
+      'now() reads the wall clock; prefer enqueued_at as the publish-time reference for repeatable routing.',
     rows: [
       { expr: 'visible_at - enqueued_at > days(1)', desc: 'delayed more than a day' },
       { expr: 'enqueued_at.Hour() >= 9 && enqueued_at.Hour() <= 21', desc: 'publish-hour window' },
@@ -117,6 +119,6 @@ export function filterRefText(): string {
     }
   }
   lines.push('')
-  lines.push('Empty filter = match all. Filter must be boolean. No IO, no wall clock; ' + 'runtime errors fail closed (message not routed).')
+  lines.push('Empty filter = match all. Filter must be boolean. No file or network I/O; ' + 'runtime errors fail closed (message not routed).')
   return lines.join('\n')
 }
