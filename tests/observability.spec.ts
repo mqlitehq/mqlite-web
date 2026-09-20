@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { isObservation, type Observation } from '../src/lib/observation.js'
 
 function sample(access: Observation['access'] = 'manage'): Observation {
-  return {
+  const snapshot: Observation = {
     version: '0.3.2',
     access,
     backend: 'memory',
@@ -93,6 +93,21 @@ function sample(access: Observation['access'] = 'manage'): Observation {
       ],
     },
   }
+  for (const task of ['scheduled', 'ttl', 'dedup', 'receipts', 'retention']) {
+    snapshot.maintenance.push({
+      task,
+      enabled: true,
+      runs: 0,
+      failures: 0,
+      interrupted: 0,
+      last_success_at_ms: 0,
+      duration: { bounds_seconds: [1], bucket_counts: [0], count: 0, sum_seconds: 0 },
+    })
+  }
+  for (const outcome of ['success', 'missing', 'invalid', 'expired', 'revoked', 'backend_error']) {
+    snapshot.http.authentication.push({ outcome, count: 0 })
+  }
+  return snapshot
 }
 interface BrokerFixture {
   observation: unknown
@@ -343,4 +358,55 @@ test('malformed legacy queue measurements never become a healthy zero or NaN', a
   await expect(stat(page, 'total')).toContainText('unknown')
   await expect(page.locator('main')).not.toContainText('NaN')
   await expect(page.getByText('dead-letter status unknown')).toBeVisible()
+})
+
+for (const domain of ['maintenance', 'filters', 'authentication'] as const) {
+  for (const mutation of ['empty', 'duplicate', 'missing known label'] as const) {
+    test(`missing-data guard: ${domain} ${mutation} is not a healthy zero`, async ({ page }) => {
+      const broker = await setup(page)
+      const snapshot = sample()
+      const rows = domain === 'authentication' ? snapshot.http.authentication : snapshot[domain]
+      if (mutation === 'empty') rows.splice(0)
+      else if (mutation === 'duplicate') rows.splice(1, 0, rows[0] as never)
+      else rows.splice(0, 1)
+      broker.observation = snapshot
+      await page.goto('/')
+      await expect(stat(page, 'total')).toContainText('unknown')
+      await expect(
+        page.getByText('The broker returned an invalid observation.', { exact: false }).first(),
+      ).toBeVisible()
+    })
+  }
+}
+
+test('canonical domain labels stay unique, nonempty and forward compatible', () => {
+  const snapshot = sample()
+  snapshot.maintenance.push({ ...snapshot.maintenance[0], task: 'future-task' })
+  snapshot.filters.push({ stage: 'future-stage', count: 0 })
+  snapshot.http.authentication.push({ outcome: 'future-outcome', count: 0 })
+  expect(isObservation(snapshot)).toBe(true)
+  for (const corrupt of [
+    (s: Observation) => {
+      s.messages.push(s.messages[0])
+    },
+    (s: Observation) => {
+      s.storage.operations.push(s.storage.operations[0])
+    },
+    (s: Observation) => {
+      s.http.requests.push(s.http.requests[0])
+    },
+    (s: Observation) => {
+      s.http.handler_latency.push(s.http.handler_latency[0])
+    },
+    (s: Observation) => {
+      s.filters[0].stage = ''
+    },
+    (s: Observation) => {
+      s.messages[0].queue = ''
+    },
+  ]) {
+    const copy = sample()
+    corrupt(copy)
+    expect(isObservation(copy)).toBe(false)
+  }
 })

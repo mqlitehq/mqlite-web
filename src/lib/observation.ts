@@ -107,6 +107,19 @@ function histogram(value: unknown): value is unknown & Histogram {
   )
 }
 
+function uniqueRows(value: unknown, keys: string[], required: string[] = []): boolean {
+  if (!Array.isArray(value)) return false
+  const seen = new Set<string>()
+  for (const row of value) {
+    if (!record(row) || keys.some((key) => typeof row[key] !== 'string' || (!row[key] && key !== 'error_code')))
+      return false
+    const key = JSON.stringify(keys.map((field) => row[field]))
+    if (seen.has(key)) return false
+    seen.add(key)
+  }
+  return required.every((label) => value.some((row) => record(row) && row[keys[0]] === label))
+}
+
 // Reject missing or malformed domains; HTTP 200 alone is not a healthy sample.
 // Unknown fields remain forward compatible with newer brokers.
 export function isObservation(value: unknown): value is Observation {
@@ -187,11 +200,31 @@ export function isObservation(value: unknown): value is Observation {
     )
   )
     return false
+  if (
+    !uniqueRows(value.messages, ['queue', 'event']) ||
+    !uniqueRows(value.storage.operations, ['operation', 'outcome', 'error_code']) ||
+    !uniqueRows(
+      value.maintenance,
+      ['task'],
+      ['locks', 'scheduled', 'ttl', 'dedup', 'receipts', 'retention', 'reclaim'],
+    ) ||
+    !uniqueRows(value.filters, ['stage'], ['compile', 'evaluate'])
+  )
+    return false
   return (
     fields(value.http, ['state'], []) &&
     ['available', 'not_applicable'].includes(value.http.state as string) &&
     rows(value.http.requests, (r) => fields(r, ['rpc', 'code'], ['count', 'duration_seconds'])) &&
     rows(value.http.authentication, (r) => fields(r, ['outcome'], ['count'])) &&
+    uniqueRows(value.http.requests, ['rpc', 'code']) &&
+    uniqueRows(value.http.handler_latency, ['rpc']) &&
+    uniqueRows(
+      value.http.authentication,
+      ['outcome'],
+      value.http.state === 'available'
+        ? ['success', 'missing', 'invalid', 'expired', 'revoked', 'permission_denied', 'backend_error']
+        : [],
+    ) &&
     rows(
       value.http.handler_latency,
       (r) =>
