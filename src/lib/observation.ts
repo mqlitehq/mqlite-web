@@ -159,6 +159,7 @@ export function isObservation(value: unknown): value is Observation {
                 'unexpected',
               ],
             ) &&
+            ['queue', 'subscription'].includes(q.kind as string) &&
             q.total ===
               Number(q.active) +
                 Number(q.locked) +

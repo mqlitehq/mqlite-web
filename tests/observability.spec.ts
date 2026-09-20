@@ -225,6 +225,10 @@ for (const [name, mutate] of Object.entries({
   'null queues with available collection': (s: Observation) => ({ ...s, queues: null }),
   'missing runtime flags': (s: Observation) => ({ ...s, runtime: {} }),
   'wrong queue sum': (s: Observation) => ({ ...s, queues: s.queues!.map((q) => ({ ...q, total: 0 })) }),
+  'unknown queue kind': (s: Observation) => ({
+    ...s,
+    queues: s.queues!.map((q) => ({ ...q, kind: 'unrecognized-kind' })),
+  }),
   'missing maintenance enabled': (s: Observation) => ({ ...s, maintenance: [{ task: 'locks', runs: 0, failures: 0 }] }),
 })) {
   test(`malformed successful observation: ${name} is unknown without legacy fallback`, async ({ page }) => {
