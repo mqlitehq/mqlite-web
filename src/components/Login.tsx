@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { ApiError, discovery, login } from '../lib/api'
-import { getEndpoint, setEndpoint } from '../lib/auth'
-import type { Discovery } from '../lib/types'
-import { Button, ErrorBanner, Input, Label } from './ui'
-import { Logo } from './Logo'
+import { ApiError, discovery, login } from '../lib/api.js'
+import { getEndpoint, setEndpoint } from '../lib/auth.js'
+import type { Discovery } from '../lib/types.js'
+import { Button, ErrorBanner, Input, Label } from './ui.js'
+import { Logo } from './Logo.js'
 
 export function Login({ onAuthed }: { onAuthed: () => void }) {
   const [endpoint, setEp] = useState(getEndpoint())
@@ -75,7 +75,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
             />
           </div>
           <div>
-            <Label>token</Label>
+            <Label>administrator token</Label>
             <Input
               type="password"
               autoFocus
@@ -99,9 +99,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
         </Button>
 
         <p className="mt-4 text-[11px] leading-relaxed text-faint">
-          point it at any broker and authenticate with one of its{' '}
-          <span className="text-muted-foreground">MQLITE_TOKENS</span>. the URL is remembered; the token stays in this
-          tab only.
+          Connect with a <span className="text-muted-foreground">manage</span> key or an administrator token from{' '}
+          <span className="text-muted-foreground">MQLITE_TOKENS</span>. The URL is remembered; the login token stays in
+          this tab only.
         </p>
       </form>
 

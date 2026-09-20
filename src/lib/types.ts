@@ -62,12 +62,7 @@ export interface Discovery {
   [k: string]: unknown
 }
 
-export type MessageState =
-  | 'active'
-  | 'locked'
-  | 'deferred'
-  | 'scheduled'
-  | 'dead_lettered'
+export type MessageState = 'active' | 'locked' | 'deferred' | 'scheduled' | 'dead_lettered'
 
 export interface Subscription {
   topic: string
@@ -94,4 +89,31 @@ export interface BrokerStatus {
   subscriptions: number
   uptime_ms: number
   auth: boolean
+}
+
+// AuthService metadata never includes a token or its digest.
+export interface AccessKey {
+  id: string
+  name: string
+  permissions: string[]
+  created_at_ms: number
+  expires_at_ms: number
+  revoked_at_ms: number
+}
+
+export interface CreateKeyRequest {
+  id: string
+  name: string
+  permissions: string[]
+  expires_at_ms?: number
+}
+
+export interface CreateKeyResult {
+  key: AccessKey
+  token: string
+}
+
+export interface KeyPage {
+  keys: AccessKey[]
+  next_after_id?: string
 }

@@ -4,8 +4,8 @@ Guidance for working in this repo.
 
 **mqlite console** is a standalone admin web UI for an [mqlite](https://github.com/mqlitehq/mqlite)
 broker — a pure client-side SPA over the broker's JSON-over-HTTP API. No backend of its
-own. It is developed separately and integrated into mqlite later (go:embed the `dist/`,
-or copy it into the broker image).
+own. It is developed separately; mqlite embeds the complete `dist/` output at `/ui/`
+from its `server/web/` directory, including third-party license notices.
 
 ## Stack & layout
 
@@ -39,7 +39,7 @@ new calls against a live broker (`mqlite serve`) before relying on them.
 ## Design system — make it ours
 
 Dark-first, **monochrome grayscale + a single amber accent** (the mqlite logo's pop).
-**Monospace everywhere** (JetBrains Mono) — it should read as a console. Compact
+**Monospace everywhere** (Geist Mono) — it should read as a console. Compact
 density, small type. Elevation via hairline **rings, not shadows** (`ring-1 ring-border`).
 Semantic state colors are **low-opacity fills** (`bg-danger/12 text-danger`) + status
 dots. Theme tokens live in `src/index.css` (`@theme`, OKLCH). This is the project's own

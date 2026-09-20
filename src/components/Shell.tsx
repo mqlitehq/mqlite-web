@@ -1,17 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { discovery } from '../lib/api'
-import type { Discovery } from '../lib/types'
-import { cn } from '../lib/cn'
-import { Logo } from './Logo'
-import { TimeFormatToggle } from './Time'
-import { Overview } from '../views/Overview'
-import { Queues } from '../views/Queues'
-import { Topics } from '../views/Topics'
-import { Metrics } from '../views/Metrics'
-import { Docs } from '../views/Docs'
-import { Detail } from '../views/Detail'
+import { discovery } from '../lib/api.js'
+import type { Discovery } from '../lib/types.js'
+import { cn } from '../lib/cn.js'
+import { Logo } from './Logo.js'
+import { TimeFormatToggle } from './Time.js'
+import { Overview } from '../views/Overview.js'
+import { Queues } from '../views/Queues.js'
+import { Topics } from '../views/Topics.js'
+import { Metrics } from '../views/Metrics.js'
+import { Docs } from '../views/Docs.js'
+import { Detail } from '../views/Detail.js'
+import { AccessKeys } from '../views/access-keys.js'
 
-export type View = 'overview' | 'queues' | 'topics' | 'metrics' | 'docs'
+export type View = 'overview' | 'queues' | 'topics' | 'metrics' | 'keys' | 'docs'
 export interface DetailTarget {
   kind: 'queue' | 'subscription'
   name: string
@@ -23,6 +24,7 @@ const NAV: { id: View; label: string }[] = [
   { id: 'queues', label: 'queues' },
   { id: 'topics', label: 'topics' },
   { id: 'metrics', label: 'metrics' },
+  { id: 'keys', label: 'access keys' },
   { id: 'docs', label: 'docs' },
 ]
 
@@ -50,10 +52,10 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-20 h-14 border-b border-border bg-surface-header/95 backdrop-blur">
-        <div className="mx-auto flex h-full max-w-6xl items-center gap-7 px-6">
+      <header className="sticky top-0 z-20 min-h-14 border-b border-border bg-surface-header/95 backdrop-blur">
+        <div className="mx-auto flex h-full min-h-14 max-w-6xl flex-wrap items-center gap-x-7 gap-y-2 px-6 py-2">
           <Logo />
-          <nav className="flex h-full items-stretch gap-5">
+          <nav className="flex h-10 items-stretch gap-4 overflow-x-auto">
             {NAV.map((n) => (
               <NavItem key={n.id} active={view === n.id} onClick={() => go(n.id)}>
                 {n.label}
@@ -62,7 +64,10 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           </nav>
           <div className="ml-auto flex items-center gap-4">
             <TimeFormatToggle />
-            <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" title={info?.status ?? 'online'}>
+            <div
+              className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"
+              title={info?.status ?? 'online'}
+            >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-ok" />
               <span className="text-faint">
                 {info?.name ?? 'broker'}
@@ -87,8 +92,10 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           <Topics onOpenSub={openSub} />
         ) : view === 'metrics' ? (
           <Metrics onOpenQueue={openQueue} onOpenSub={openSub} />
+        ) : view === 'keys' ? (
+          <AccessKeys />
         ) : (
-          <Docs />
+          <Docs onOpenKeys={() => go('keys')} />
         )}
       </main>
     </div>
@@ -100,7 +107,7 @@ function NavItem({ active, onClick, children }: { active: boolean; onClick: () =
     <button
       onClick={onClick}
       className={cn(
-        'relative flex h-full items-center text-sm font-semibold transition-colors',
+        'relative flex h-full shrink-0 items-center whitespace-nowrap text-sm font-semibold transition-colors',
         active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
       )}
     >
