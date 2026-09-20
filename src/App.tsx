@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { onUnauthorized } from './lib/api'
-import { clearToken, isAuthed } from './lib/auth'
-import { Login } from './components/Login'
-import { Shell } from './components/Shell'
+import { onUnauthorized } from './lib/api.js'
+import { clearToken, isAuthed } from './lib/auth.js'
+import { Login } from './components/Login.js'
+import { ObservationProvider } from './lib/observation-context.js'
+import { Shell } from './components/Shell.js'
 
 export function App() {
   const [authed, setAuthed] = useState(isAuthed())
@@ -16,5 +17,9 @@ export function App() {
   }, [])
 
   if (!authed) return <Login onAuthed={() => setAuthed(true)} />
-  return <Shell onSignOut={signOut} />
+  return (
+    <ObservationProvider>
+      <Shell onSignOut={signOut} />
+    </ObservationProvider>
+  )
 }

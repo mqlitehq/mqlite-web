@@ -3,6 +3,7 @@
 // the token and signalling a re-login). Base URL is '' = same origin (the broker can
 // embed and serve this console at /ui/); the dev server proxies the RPC paths.
 
+import { isObservation, type Observation } from './observation.js'
 import { getToken, clearToken, setToken, getEndpoint } from './auth.js'
 import type {
   AccessKey,
@@ -44,10 +45,11 @@ export function onUnauthorized(fn: Listener): () => void {
   return () => unauthListeners.delete(fn)
 }
 
-async function rpc<T>(path: string, body?: unknown, token?: string): Promise<T> {
+async function rpc<T>(path: string, body?: unknown, token?: string, signal?: AbortSignal): Promise<T> {
   const tok = token ?? getToken()
   const res = await fetch(base() + path, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
@@ -112,13 +114,18 @@ export async function discovery(): Promise<Discovery | null> {
 // ── auth: validate a token by making one authed call ───────────────────────────
 export async function login(token: string): Promise<void> {
   try {
-    await rpc('/mqlite.v1.AdminService/ListQueues', {}, token)
+    try {
+      await observe(token)
+    } catch (error) {
+      if (!observeUnsupported(error)) throw error
+      await rpc('/mqlite.v1.AdminService/ListQueues', {}, token)
+    }
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
       throw new ApiError(
         403,
         'permission_denied',
-        'This admin console requires a manage key or a configured administrator token. Send and listen keys work with the API, SDK, and CLI.',
+        'This console requires a manage key, a configured administrator token, or a configured monitor token. Send and listen keys work with the API, SDK, and CLI.',
       )
     }
     throw error
@@ -126,9 +133,37 @@ export async function login(token: string): Promise<void> {
   setToken(token)
 }
 
+export function observeUnsupported(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 404 &&
+    (error.code === 'unimplemented' || error.message.startsWith('no such path'))
+  )
+}
+
+export async function observe(token?: string): Promise<Observation> {
+  const result = await rpc<unknown>('/mqlite.v1.AdminService/Observe', {}, token, AbortSignal.timeout(15000))
+  if (!isObservation(result))
+    throw new ApiError(502, 'invalid_response', 'The broker returned an invalid observation. Availability is unknown.')
+  return result
+}
+
 // ── AdminService ───────────────────────────────────────────────────────────────
 export async function listQueues(): Promise<QueueInfo[]> {
-  const r = await rpc<{ queues?: QueueInfo[] }>('/mqlite.v1.AdminService/ListQueues', {})
+  const r = await rpc<{ queues?: QueueInfo[] }>(
+    '/mqlite.v1.AdminService/ListQueues',
+    {},
+    undefined,
+    AbortSignal.timeout(5000),
+  )
+  if (
+    !record(r) ||
+    !('queues' in r) ||
+    (r.queues !== null &&
+      (!Array.isArray(r.queues) ||
+        r.queues.some((q) => !record(q) || typeof q.name !== 'string' || typeof q.kind !== 'string')))
+  )
+    throw new ApiError(502, 'invalid_response', 'Queue inventory is unavailable.')
   return r.queues ?? []
 }
 export function createQueue(name: string, config: QueueConfig = {}): Promise<unknown> {
@@ -147,7 +182,20 @@ export function status(): Promise<BrokerStatus> {
 }
 // Every subscription with its topic + filter expression — what ListQueues omits.
 export async function listSubscriptions(): Promise<Subscription[]> {
-  const r = await rpc<{ subscriptions?: Subscription[] }>('/mqlite.v1.AdminService/ListSubscriptions', {})
+  const r = await rpc<{ subscriptions?: Subscription[] }>(
+    '/mqlite.v1.AdminService/ListSubscriptions',
+    {},
+    undefined,
+    AbortSignal.timeout(5000),
+  )
+  if (
+    !record(r) ||
+    !('subscriptions' in r) ||
+    (r.subscriptions !== null &&
+      (!Array.isArray(r.subscriptions) ||
+        r.subscriptions.some((sub) => !record(sub) || typeof sub.name !== 'string' || typeof sub.topic !== 'string')))
+  )
+    throw new ApiError(502, 'invalid_response', 'Subscription inventory is unavailable.')
   return r.subscriptions ?? []
 }
 
@@ -181,9 +229,19 @@ export async function purge(queue: string, opts: { max?: number; older_than_ms?:
 }
 
 // ── QueueService ─────────────────────────────────────────────────────────────
-export function stats(queue: string): Promise<Metrics> {
-  return rpc<Metrics>('/mqlite.v1.QueueService/Stats', { queue })
+export async function stats(queue: string): Promise<Metrics> {
+  const value = await rpc<Metrics>('/mqlite.v1.QueueService/Stats', { queue }, undefined, AbortSignal.timeout(5000))
+  if (
+    !record(value) ||
+    value.queue !== queue ||
+    !['active', 'locked', 'deferred', 'scheduled', 'dead_lettered', 'total', 'oldest_message_age_ms'].every(
+      (key) => typeof value[key] === 'number' && Number.isSafeInteger(value[key]) && value[key] >= 0,
+    )
+  )
+    throw new ApiError(502, 'invalid_response', 'Queue measurements are unavailable.')
+  return value
 }
+
 export async function send(
   queue: string,
   msg: Partial<WireMessage> & { bodyText?: string; ttlMs?: number; scheduledEnqueueTimeMs?: number },
@@ -311,7 +369,11 @@ export async function createAccessKey(request: CreateKeyRequest): Promise<Create
   return { key: result.key, token: result.token }
 }
 
-export async function listAccessKeys(afterID = '', limit = 25, sort: '' | 'id_asc' | 'created_desc' = 'id_asc'): Promise<KeyPage> {
+export async function listAccessKeys(
+  afterID = '',
+  limit = 25,
+  sort: '' | 'id_asc' | 'created_desc' = 'id_asc',
+): Promise<KeyPage> {
   const result = await rpc<unknown>('/mqlite.v1.AuthService/ListKeys', { after_id: afterID, limit, sort })
   if (!record(result) || !Array.isArray(result.keys) || result.keys.length > limit) throw invalidKeyResponse()
   const seen = new Set<string>()
@@ -319,10 +381,12 @@ export async function listAccessKeys(afterID = '', limit = 25, sort: '' | 'id_as
   for (const key of result.keys) {
     if (!keyMetadata(key) || key.id === afterID || seen.has(key.id)) throw invalidKeyResponse()
     if (sort === 'created_desc') {
-      if (previous && (
-        key.created_at_ms > previous.created_at_ms ||
-        (key.created_at_ms === previous.created_at_ms && key.id >= previous.id)
-      )) throw invalidKeyResponse()
+      if (
+        previous &&
+        (key.created_at_ms > previous.created_at_ms ||
+          (key.created_at_ms === previous.created_at_ms && key.id >= previous.id))
+      )
+        throw invalidKeyResponse()
     } else if (key.id <= (previous?.id ?? afterID)) {
       throw invalidKeyResponse()
     }

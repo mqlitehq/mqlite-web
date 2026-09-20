@@ -1,7 +1,7 @@
 {
   "name": "mqlite-web",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "MIT",
   "description": "Admin console for an mqlite broker — a queue dashboard you log into with a broker token.",
   "type": "module",

@@ -1,8 +1,11 @@
-import { useTopology } from '../lib/useTopology'
-import type { Metrics as M } from '../lib/types'
-import { Card, ErrorBanner, PageHeader, Spinner, Stat, StatStrip } from '../components/ui'
-import { Button } from '../components/ui'
-import { fmtNum } from '../lib/format'
+import { queueTotals } from '../lib/observation.js'
+import { SystemPanel } from '../components/SystemPanel.js'
+import { ProcessObservation } from '../components/process-observation.js'
+import { useTopology } from '../lib/useTopology.js'
+import type { Metrics as M } from '../lib/types.js'
+import { Card, ErrorBanner, PageHeader, Spinner, Stat, StatStrip } from '../components/ui.js'
+import { Button } from '../components/ui.js'
+import { fmtNum } from '../lib/format.js'
 
 interface Row {
   name: string
@@ -18,24 +21,22 @@ export function Metrics({
   onOpenQueue: (name: string) => void
   onOpenSub: (topic: string, name: string) => void
 }) {
-  const { queues, subscriptions, metrics, loading, err, reload } = useTopology()
+  const { queues, subscriptions, metrics, loading, err, reload, complete, canManage, observation } = useTopology()
 
-  const agg = Object.values(metrics).reduce(
-    (a, m) => ({
-      active: a.active + m.active,
-      locked: a.locked + m.locked,
-      scheduled: a.scheduled + m.scheduled,
-      deferred: a.deferred + m.deferred,
-      dlq: a.dlq + m.dead_lettered,
-      total: a.total + m.total,
-    }),
-    { active: 0, locked: 0, scheduled: 0, deferred: 0, dlq: 0, total: 0 },
-  )
+  const agg = queueTotals(metrics, complete)
+  const count = (value?: number) => (value === undefined ? 'unknown' : fmtNum(value))
 
-  const queueRows: Row[] = queues.flatMap((q) =>
+  const observedQueues =
+    observation?.queues?.filter((q) => q.kind !== 'subscription').map((q) => ({ name: q.queue })) ?? queues
+  const queueRows: Row[] = observedQueues.flatMap((q) =>
     metrics[q.name] ? [{ name: q.name, m: metrics[q.name], open: () => onOpenQueue(q.name) }] : [],
   )
-  const subRows: Row[] = subscriptions.flatMap((s) =>
+  const observedSubscriptions = observation?.queues
+    ? observation.queues
+        .filter((q) => q.kind === 'subscription')
+        .map((q) => subscriptions.find((s) => s.name === q.queue) ?? { name: q.queue, topic: '', expr: '' })
+    : subscriptions
+  const subRows: Row[] = observedSubscriptions.flatMap((s) =>
     metrics[s.name] ? [{ name: s.name, m: metrics[s.name], sub: s.topic, open: () => onOpenSub(s.topic, s.name) }] : [],
   )
 
@@ -53,29 +54,48 @@ export function Metrics({
         }
       />
 
+      <SystemPanel />
       {err && <ErrorBanner message={err} />}
       {loading ? (
         <Spinner label="loading metrics" />
       ) : (
         <>
           <StatStrip label="totals · all targets">
-            <Stat label="active" v={fmtNum(agg.active)} state="active" />
-            <Stat label="locked" v={fmtNum(agg.locked)} state="locked" tone={agg.locked ? 'warn' : undefined} />
-            <Stat label="scheduled" v={fmtNum(agg.scheduled)} state="scheduled" />
-            <Stat label="deferred" v={fmtNum(agg.deferred)} state="deferred" />
-            <Stat label="dead-letter" v={fmtNum(agg.dlq)} state="dead_lettered" tone={agg.dlq ? 'danger' : undefined} />
-            <Stat label="total" v={fmtNum(agg.total)} />
+            <Stat label="active" v={count(agg?.active)} state="active" />
+            <Stat label="locked" v={count(agg?.locked)} state="locked" tone={agg?.locked ? 'warn' : undefined} />
+            <Stat label="scheduled" v={count(agg?.scheduled)} state="scheduled" />
+            <Stat label="deferred" v={count(agg?.deferred)} state="deferred" />
+            <Stat
+              label="dead-letter"
+              v={count(agg?.dlq)}
+              state="dead_lettered"
+              tone={agg?.dlq ? 'danger' : undefined}
+            />
+            <Stat label="total" v={count(agg?.total)} />
           </StatStrip>
 
-          <BarSection title="queues" rows={queueRows} peak={peak} />
-          <BarSection title="subscriptions" rows={subRows} peak={peak} />
+          <ProcessObservation />
+          <BarSection title="queues" rows={queueRows} peak={peak} canManage={canManage} known={complete} />
+          <BarSection title="subscriptions" rows={subRows} peak={peak} canManage={canManage} known={complete} />
         </>
       )}
     </div>
   )
 }
 
-function BarSection({ title, rows, peak }: { title: string; rows: Row[]; peak: number }) {
+function BarSection({
+  title,
+  rows,
+  peak,
+  canManage,
+  known,
+}: {
+  title: string
+  rows: Row[]
+  peak: number
+  canManage: boolean
+  known: boolean
+}) {
   return (
     <div>
       <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-faint">
@@ -83,7 +103,7 @@ function BarSection({ title, rows, peak }: { title: string; rows: Row[]; peak: n
         <span className="text-faint/60">· {rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <Card className="px-4 py-5 text-center text-sm text-muted-foreground">none</Card>
+        <Card className="px-4 py-5 text-center text-sm text-muted-foreground">{known ? 'none' : 'unknown'}</Card>
       ) : (
         <Card className="divide-y divide-border/60">
           {rows
@@ -92,6 +112,7 @@ function BarSection({ title, rows, peak }: { title: string; rows: Row[]; peak: n
             .map((r) => (
               <button
                 key={r.name}
+                disabled={!canManage}
                 onClick={r.open}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/40"
               >
@@ -108,7 +129,9 @@ function BarSection({ title, rows, peak }: { title: string; rows: Row[]; peak: n
                 <div className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
                   {fmtNum(r.m.total)}
                 </div>
-                {r.m.dead_lettered > 0 && <span className="w-10 shrink-0 text-right text-xs tabular-nums text-danger">{r.m.dead_lettered}</span>}
+                {r.m.dead_lettered > 0 && (
+                  <span className="w-10 shrink-0 text-right text-xs tabular-nums text-danger">{r.m.dead_lettered}</span>
+                )}
               </button>
             ))}
         </Card>

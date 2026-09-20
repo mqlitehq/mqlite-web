@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { createQueue } from '../lib/api'
-import type { QueueConfig } from '../lib/types'
-import { useTopology } from '../lib/useTopology'
-import { Badge, Button, Card, Empty, ErrorBanner, Input, Label, PageHeader, Select, Spinner } from '../components/ui'
-import { Time } from '../components/Time'
-import { fmtNum } from '../lib/format'
+import { createQueue } from '../lib/api.js'
+import type { QueueConfig } from '../lib/types.js'
+import { useTopology } from '../lib/useTopology.js'
+import { Badge, Button, Card, Empty, ErrorBanner, Input, Label, PageHeader, Select, Spinner } from '../components/ui.js'
+import { Time } from '../components/Time.js'
+import { fmtNum } from '../lib/format.js'
 
 const TIME_UNITS = [
   { label: 'seconds', ms: 1000 },
@@ -20,7 +20,17 @@ const BYTE_UNITS = [
 const ms = (n: string, unit: string) => (Number(n) > 0 ? Number(n) * Number(unit) : 0)
 
 // number + unit-select → a duration in ms (0 when blank).
-function DurField({ n, setN, u, setU }: { n: string; setN: (v: string) => void; u: string; setU: (v: string) => void }) {
+function DurField({
+  n,
+  setN,
+  u,
+  setU,
+}: {
+  n: string
+  setN: (v: string) => void
+  u: string
+  setU: (v: string) => void
+}) {
   return (
     <div className="flex gap-2">
       <Input type="number" min="0" className="w-24" value={n} onChange={(e) => setN(e.target.value)} placeholder="0" />
@@ -75,7 +85,7 @@ export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
       {loading ? (
         <Spinner label="loading queues" />
       ) : queues.length === 0 ? (
-        <Empty>no queues yet — create one above</Empty>
+        <Empty>{err ? 'queue inventory unknown' : 'no queues yet — create one above'}</Empty>
       ) : (
         <Card className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
@@ -116,7 +126,13 @@ export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
                     <Num v={m?.dead_lettered} tone={m?.dead_lettered ? 'danger' : undefined} />
                     <Num v={m?.total} bold />
                     <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">
-                      {m?.oldest_message_age_ms ? <Time ms={Date.now() - m.oldest_message_age_ms} /> : '—'}
+                      {!m ? (
+                        'unknown'
+                      ) : m.oldest_message_age_ms ? (
+                        <Time ms={Date.now() - m.oldest_message_age_ms} />
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right text-faint">→</td>
                   </tr>
@@ -136,10 +152,16 @@ function Th({ children, className }: { children?: ReactNode; className?: string 
 
 function Num({ v, tone, bold }: { v?: number; tone?: 'warn' | 'danger'; bold?: boolean }) {
   const color =
-    tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-warn' : bold ? 'text-foreground' : 'text-muted-foreground'
+    tone === 'danger'
+      ? 'text-danger'
+      : tone === 'warn'
+        ? 'text-warn'
+        : bold
+          ? 'text-foreground'
+          : 'text-muted-foreground'
   return (
     <td className={`px-3 py-2.5 text-center tabular-nums ${color} ${bold ? 'font-semibold' : ''}`}>
-      {v === undefined ? '·' : fmtNum(v)}
+      {v === undefined ? 'unknown' : fmtNum(v)}
     </td>
   )
 }
@@ -255,12 +277,25 @@ function CreateQueueForm({ onClose, onDone }: { onClose: () => void; onDone: () 
           </div>
           <div>
             <Label>max count</Label>
-            <Input type="number" min="0" value={maxCount} onChange={(e) => setMaxCount(e.target.value)} placeholder="0" />
+            <Input
+              type="number"
+              min="0"
+              value={maxCount}
+              onChange={(e) => setMaxCount(e.target.value)}
+              placeholder="0"
+            />
           </div>
           <div>
             <Label>max bytes</Label>
             <div className="flex gap-2">
-              <Input type="number" min="0" className="w-24" value={bytesN} onChange={(e) => setBytesN(e.target.value)} placeholder="0" />
+              <Input
+                type="number"
+                min="0"
+                className="w-24"
+                value={bytesN}
+                onChange={(e) => setBytesN(e.target.value)}
+                placeholder="0"
+              />
               <Select value={bytesU} onChange={(e) => setBytesU(e.target.value)} className="flex-1">
                 {BYTE_UNITS.map((b) => (
                   <option key={b.mul} value={b.mul}>

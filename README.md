@@ -42,7 +42,8 @@ npm run build      # → dist/  (static, path-relative, ~100 kB gzipped JS)
 ## Auth
 
 Log in with a managed key with `manage` permission or one of the broker's configured
-`MQLITE_TOKENS` administrators. Send/listen keys are for applications and receive a
+`MQLITE_TOKENS` administrators. Configured `MQLITE_MONITOR_TOKENS` credentials
+open read-only overview and metrics views. Send/listen keys are for applications and receive a
 clear administrator requirement at console login. The login token is kept in
 `sessionStorage` (this tab only) and sent as `Authorization: Bearer …` on every call;
 any `401` clears it and bounces back to the login screen. A `403` reports missing
@@ -135,3 +136,19 @@ all permission choices, one-time secret handling, retained IDs, lost responses,
 pagination, revocation confirmation, login permissions, and older brokers. It does
 not import, build, or require the broker repository. Validate API changes against a
 live broker separately before embedding the new `dist/`.
+
+## Unified observation
+
+Brokers with `Observe` support supply one canonical snapshot to the overview, metrics
+view, and queue detail counters. Queue collection failures show unknown gauges,
+while available process counters remain visible. The view includes collection
+freshness, storage availability, committed message effects, errors, maintenance,
+and an expandable full snapshot. Process counters reset when the broker restarts.
+
+A token configured in `MQLITE_MONITOR_TOKENS` opens only the read-only overview and
+metrics views. The console does not call administrative or message APIs with that
+credential. Managed `send` and `listen` keys retain their existing API permissions.
+
+Older brokers use the existing List/Stats endpoints only when Observe reports an
+unsupported route. Missing per-queue data makes aggregate counts unknown; auth,
+network, invalid-response and server errors never trigger this fallback.

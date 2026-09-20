@@ -1,10 +1,21 @@
 import { useState } from 'react'
-import { subscribe } from '../lib/api'
-import { useTopology, type Topic } from '../lib/useTopology'
-import type { Metrics } from '../lib/types'
-import { Badge, Button, Card, Empty, ErrorBanner, FilterCode, Input, Label, PageHeader, Spinner } from '../components/ui'
-import { FilterEditor } from '../components/FilterEditor'
-import { PublishPanel } from '../components/Composer'
+import { subscribe } from '../lib/api.js'
+import { useTopology, type Topic } from '../lib/useTopology.js'
+import type { Metrics } from '../lib/types.js'
+import {
+  Badge,
+  Button,
+  Card,
+  Empty,
+  ErrorBanner,
+  FilterCode,
+  Input,
+  Label,
+  PageHeader,
+  Spinner,
+} from '../components/ui.js'
+import { FilterEditor } from '../components/FilterEditor.js'
+import { PublishPanel } from '../components/Composer.js'
 
 export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string) => void }) {
   const { topics, subscriptions, metrics, loading, err, reload } = useTopology()
@@ -54,7 +65,7 @@ export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string)
       {loading ? (
         <Spinner label="loading topics" />
       ) : topics.length === 0 ? (
-        <Empty>no topics yet — add a subscription to create one</Empty>
+        <Empty>{err ? 'topic inventory unknown' : 'no topics yet — add a subscription to create one'}</Empty>
       ) : (
         <div className="mt-4 space-y-4">
           {topics.map((t) => (
@@ -117,7 +128,9 @@ function TopicCard({
               <span className="min-w-0 flex-1 truncate">
                 <FilterCode expr={s.expr} />
               </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{m?.active ?? '·'} active</span>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                {m?.active ?? 'unknown'} active
+              </span>
               {m && m.dead_lettered > 0 && <Badge tone="danger">{m.dead_lettered} dlq</Badge>}
               <span className="shrink-0 text-faint">→</span>
             </button>
@@ -128,15 +141,7 @@ function TopicCard({
   )
 }
 
-function NewSubscription({
-  topics,
-  onClose,
-  onDone,
-}: {
-  topics: string[]
-  onClose: () => void
-  onDone: () => void
-}) {
+function NewSubscription({ topics, onClose, onDone }: { topics: string[]; onClose: () => void; onDone: () => void }) {
   const [topic, setTopic] = useState('')
   const [name, setName] = useState('')
   const [expr, setExpr] = useState('')

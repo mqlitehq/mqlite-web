@@ -73,6 +73,7 @@ async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
       return respond({ code: 'permission_denied', message: 'key management requires authentication' }, 403)
     if (path.includes('AuthService') && broker.unsupported)
       return respond({ code: 'not_found', message: 'no such path' }, 404)
+    if (path.endsWith('/Observe')) return respond({ code: 'unimplemented', message: 'no such path' }, 404)
     const body = route.request().postDataJSON()
     if (path.endsWith('/ListKeys')) {
       broker.lists.push(body as KeyListRequest)
