@@ -83,7 +83,11 @@ the exact ID, revoke any undelivered key, and create a replacement with a new ID
 A missing row does not prove an outstanding request cannot commit later. Dismissing
 an unresolved ID requires confirmation and does not revoke a key or cancel a call.
 
-Lists are paginated and show active, expired, and revoked records. Revocation
+Lists show active, expired, and revoked records, newest created first across all
+pages. The broker orders by creation time and then public ID, both descending;
+cursor pagination keeps existing records in order when another key is created.
+Creating a key returns the list to the first page. Exact-ID reconciliation uses
+the API's default ID order independently of the displayed list. Revocation
 requires confirmation and rejects newly authenticated requests; already-authorized
 operations may finish. Revoking an issuer does not revoke other keys it created.
 Rotate by creating a replacement, switching clients, and revoking the old key.

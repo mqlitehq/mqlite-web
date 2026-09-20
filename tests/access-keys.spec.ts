@@ -17,8 +17,14 @@ interface SendRequest {
   messages: { body: string }[]
   scheduled_enqueue_time_ms?: number
 }
+interface KeyListRequest {
+  after_id?: string
+  limit?: number
+  sort?: string
+}
 interface Broker {
   keys: Key[]
+  lists: KeyListRequest[]
   queues: string[]
   sends: SendRequest[]
   creates: number
@@ -36,6 +42,7 @@ interface Broker {
 async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
   const broker: Broker = {
     keys: initial,
+    lists: [],
     queues: [],
     sends: [],
     creates: 0,
@@ -68,7 +75,21 @@ async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
       return respond({ code: 'not_found', message: 'no such path' }, 404)
     const body = route.request().postDataJSON()
     if (path.endsWith('/ListKeys')) {
-      const all = broker.keys.filter((key) => key.id > (body.after_id ?? '')).sort((a, b) => a.id.localeCompare(b.id))
+      broker.lists.push(body as KeyListRequest)
+      const sort = body.sort || 'id_asc'
+      if (sort !== 'id_asc' && sort !== 'created_desc') return respond({ code: 'invalid_argument', message: 'invalid sort' }, 400)
+      const cursor = body.after_id ? broker.keys.find((key) => key.id === body.after_id) : undefined
+      if (sort === 'created_desc' && body.after_id && !cursor) {
+        return respond({ code: 'invalid_argument', message: 'unknown key cursor' }, 400)
+      }
+      const all = broker.keys.filter((key) => sort === 'created_desc'
+        ? !cursor || key.created_at_ms < cursor.created_at_ms ||
+          (key.created_at_ms === cursor.created_at_ms && key.id < cursor.id)
+        : key.id > (body.after_id ?? ''),
+      ).sort((a, b) => sort === 'created_desc'
+        ? b.created_at_ms - a.created_at_ms || b.id.localeCompare(a.id)
+        : a.id.localeCompare(b.id),
+      )
       const keys = all.slice(0, body.limit || 100)
       return respond({ keys, ...(all.length > keys.length ? { next_after_id: keys[keys.length - 1].id } : {}) })
     }
@@ -240,6 +261,7 @@ test('reload loses the secret but preserves its public ID for exact reconciliati
   await expectNoStoredSecret(page, broker.lastSecret)
   await page.getByRole('button', { name: 'check request ID' }).click()
   await expect(page.getByText(/Found this exact request ID: active/)).toBeVisible()
+  expect(broker.lists.at(-1)).toEqual({ after_id: (BigInt(`0x${id}`) - 1n).toString(16).padStart(32, '0'), limit: 1, sort: 'id_asc' })
   await page.getByRole('button', { name: 'revoke undelivered key' }).click()
   await page.getByRole('button', { name: 'cancel', exact: true }).click()
   expect(broker.revokes).toBe(0)
@@ -290,13 +312,14 @@ test('pending creation with no row warns that it can still commit', async ({ pag
 })
 
 test('lists all states, paginates, and requires confirmation to revoke', async ({ page }) => {
+  const now = Date.now()
   const keys: Key[] = Array.from({ length: 27 }, (_, i) => ({
     id: (i + 1).toString(16).padStart(32, '0'),
     name: `key-${i + 1}`,
     permissions: ['send'],
-    created_at_ms: Date.now() - 10000,
-    expires_at_ms: i === 1 ? Date.now() - 1000 : 0,
-    revoked_at_ms: i === 2 ? Date.now() - 500 : 0,
+    created_at_ms: now - 10000 - i,
+    expires_at_ms: i === 1 ? now - 1000 : 0,
+    revoked_at_ms: i === 2 ? now - 500 : 0,
   }))
   const broker = await setup(page, keys)
   await expect(page.getByRole('row')).toHaveCount(26)
@@ -313,6 +336,101 @@ test('lists all states, paginates, and requires confirmation to revoke', async (
   await expect(page.getByRole('button', { name: 'revoke key-1', exact: true })).toBeDisabled()
   expect(broker.revokes).toBe(1)
 })
+
+// A known newest-first sequence: IDs deliberately vary independently of time,
+// and every three records share a timestamp, including across a page boundary.
+function historyKeys(): Key[] {
+  const created = Date.now() - 60_000
+  const keys: Key[] = []
+  for (let group = 0; group < 20; group++) {
+    const ids = Array.from({ length: group === 19 ? 1 : 3 }, (_, index) =>
+      (((group * 3 + index) * 29) % 61 + 1).toString(16).padStart(32, '0'),
+    ).sort().reverse()
+    for (const id of ids) {
+      keys.push({
+        id,
+        name: `history-${id}`,
+        permissions: ['send'],
+        created_at_ms: created - group * 1000,
+        expires_at_ms: group % 5 === 0 ? created + 10_000 : 0,
+        revoked_at_ms: group % 7 === 0 ? created + 20_000 : 0,
+      })
+    }
+  }
+  return keys
+}
+
+test('managed keys use global newest-first ordering across more than two pages', async ({ page }) => {
+  const expected = historyKeys()
+  const broker = await setup(page, [...expected].reverse())
+  const ids = page.locator('tbody tr td:first-child code')
+  await expect(page.getByText('25 per page · newest first', { exact: true })).toBeVisible()
+  await expect(ids).toHaveText(expected.slice(0, 25).map((key) => key.id))
+  await expect(page.getByText('revoked', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('expired', { exact: true }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'next', exact: true }).click()
+  await expect(ids).toHaveText(expected.slice(25, 50).map((key) => key.id))
+  await page.getByRole('button', { name: 'next', exact: true }).click()
+  await expect(ids).toHaveText(expected.slice(50).map((key) => key.id))
+  await expect(page.getByRole('button', { name: 'next', exact: true })).toBeDisabled()
+  expect(broker.lists).toEqual([
+    { after_id: '', limit: 25, sort: 'created_desc' },
+    { after_id: expected[24].id, limit: 25, sort: 'created_desc' },
+    { after_id: expected[49].id, limit: 25, sort: 'created_desc' },
+  ])
+  await page.getByRole('button', { name: 'previous', exact: true }).click()
+  await expect(ids).toHaveText(expected.slice(25, 50).map((key) => key.id))
+})
+
+test('a new head record does not duplicate or skip existing keys while paging', async ({ page }) => {
+  const expected = historyKeys()
+  const broker = await setup(page, [...expected].reverse())
+  const ids = page.locator('tbody tr td:first-child code')
+  await expect(ids).toHaveText(expected.slice(0, 25).map((key) => key.id))
+  const seen = await ids.allTextContents()
+  const newest: Key = { ...validListKey, id: 'f'.repeat(32), name: 'external-new-key', created_at_ms: Date.now() }
+  broker.keys.push(newest)
+  for (const start of [25, 50]) {
+    await page.getByRole('button', { name: 'next', exact: true }).click()
+    await expect(ids).toHaveText(expected.slice(start, start + 25).map((key) => key.id))
+    seen.push(...await ids.allTextContents())
+  }
+  expect(seen).toEqual(expected.map((key) => key.id))
+  expect(new Set(seen).size).toBe(expected.length)
+  await page.getByRole('button', { name: 'previous', exact: true }).click()
+  await expect(ids).toHaveText(expected.slice(25, 50).map((key) => key.id))
+  await page.getByRole('button', { name: 'previous', exact: true }).click()
+  await expect(ids).toHaveText([newest, ...expected.slice(0, 24)].map((key) => key.id))
+})
+
+test('creating a key from a later page returns to the newest key first', async ({ page }) => {
+  const expected = historyKeys()
+  const broker = await setup(page, [...expected].reverse())
+  await page.getByRole('button', { name: 'next', exact: true }).click()
+  const ids = page.locator('tbody tr td:first-child code')
+  await expect(ids).toHaveText(expected.slice(25, 50).map((key) => key.id))
+  await create(page, 'newest-created-key')
+  await expect(page.getByRole('textbox', { name: 'new access key secret' })).toBeVisible()
+  const newest = broker.keys.at(-1)!
+  await expect(ids).toHaveText([newest, ...expected.slice(0, 24)].map((key) => key.id))
+  await expect(page.getByRole('button', { name: 'previous', exact: true })).toBeDisabled()
+  expect(broker.lists.at(-1)).toEqual({ after_id: '', limit: 25, sort: 'created_desc' })
+})
+
+for (const repeated of ['row', 'next cursor']) {
+  test(`rejects a repeated request cursor in the response ${repeated}`, async ({ page }) => {
+    const expected = historyKeys()
+    const broker = await setup(page, [...expected].reverse())
+    broker.malformed = (path, result) => {
+      if (!path.endsWith('/ListKeys')) return result
+      return repeated === 'row'
+        ? { keys: [expected[24]] }
+        : { keys: expected.slice(25, 50), next_after_id: expected[24].id }
+    }
+    await page.getByRole('button', { name: 'next', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('invalid key response')
+  })
+}
 
 test('403 keeps the session and 401 returns to login', async ({ page }) => {
   const broker = await setup(page)
@@ -409,7 +527,8 @@ const validListKey: Key = {
 }
 const invalidLists: Record<string, unknown> = {
   'duplicate IDs': { keys: [validListKey, validListKey] },
-  'descending IDs': { keys: [{ ...validListKey, id: '2'.padStart(32, '0') }, validListKey] },
+  'ascending IDs with equal creation time': { keys: [validListKey, { ...validListKey, id: '2'.padStart(32, '0') }] },
+  'increasing creation time': { keys: [validListKey, { ...validListKey, id: '2'.padStart(32, '0'), created_at_ms: 2 }] },
   'invalid permission list': { keys: [{ ...validListKey, permissions: ['send,listen'] }] },
   'cursor does not match last ID': { keys: [validListKey], next_after_id: '2'.padStart(32, '0') },
   'cursor on incomplete page': { keys: [validListKey], next_after_id: validListKey.id },

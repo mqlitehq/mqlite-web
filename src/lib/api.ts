@@ -311,20 +311,31 @@ export async function createAccessKey(request: CreateKeyRequest): Promise<Create
   return { key: result.key, token: result.token }
 }
 
-export async function listAccessKeys(afterID = '', limit = 25): Promise<KeyPage> {
-  const result = await rpc<unknown>('/mqlite.v1.AuthService/ListKeys', { after_id: afterID, limit })
+export async function listAccessKeys(afterID = '', limit = 25, sort: '' | 'id_asc' | 'created_desc' = 'id_asc'): Promise<KeyPage> {
+  const result = await rpc<unknown>('/mqlite.v1.AuthService/ListKeys', { after_id: afterID, limit, sort })
   if (!record(result) || !Array.isArray(result.keys) || result.keys.length > limit) throw invalidKeyResponse()
-  let previous = afterID
+  const seen = new Set<string>()
+  let previous: AccessKey | undefined
   for (const key of result.keys) {
-    if (!keyMetadata(key) || key.id <= previous) throw invalidKeyResponse()
-    previous = key.id
+    if (!keyMetadata(key) || key.id === afterID || seen.has(key.id)) throw invalidKeyResponse()
+    if (sort === 'created_desc') {
+      if (previous && (
+        key.created_at_ms > previous.created_at_ms ||
+        (key.created_at_ms === previous.created_at_ms && key.id >= previous.id)
+      )) throw invalidKeyResponse()
+    } else if (key.id <= (previous?.id ?? afterID)) {
+      throw invalidKeyResponse()
+    }
+    seen.add(key.id)
+    previous = key
   }
   if (
     result.next_after_id !== undefined &&
     (typeof result.next_after_id !== 'string' ||
       !result.keys.length ||
-      result.next_after_id !== previous ||
-      result.next_after_id <= afterID ||
+      result.next_after_id !== previous?.id ||
+      result.next_after_id === afterID ||
+      (sort !== 'created_desc' && result.next_after_id <= afterID) ||
       result.keys.length !== limit)
   )
     throw invalidKeyResponse()

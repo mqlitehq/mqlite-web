@@ -55,7 +55,7 @@ export function AccessKeys() {
     setLoading(true)
     setError('')
     try {
-      const result = await listAccessKeys(cursor)
+      const result = await listAccessKeys(cursor, 25, 'created_desc')
       if (request === sequence.current) {
         setPage(result)
         setUnsupported(false)
@@ -176,7 +176,7 @@ export function AccessKeys() {
     setChecking(true)
     setError('')
     try {
-      // ListKeys is ordered by ID. Its predecessor cursor selects this exact ID
+      // The default ID ordering and its predecessor cursor select this exact ID
       // without downloading every credential or inferring identity from its name.
       const number = BigInt(`0x${pending.id}`)
       const before = number === 0n ? '' : (number - 1n).toString(16).padStart(32, '0')
@@ -406,7 +406,7 @@ export function AccessKeys() {
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">managed keys</h2>
-            <span className="text-xs text-faint">25 per page · ordered by ID</span>
+            <span className="text-xs text-faint">25 per page · newest first</span>
           </div>
           {loading ? (
             <Spinner label="loading keys" />
