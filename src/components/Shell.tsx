@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { discovery } from '../lib/api.js'
 import type { Discovery } from '../lib/types.js'
+import { useObservation } from '../lib/observation-context.js'
 import { cn } from '../lib/cn.js'
 import { Logo } from './Logo.js'
 import { TimeFormatToggle } from './Time.js'
@@ -29,6 +30,13 @@ const NAV: { id: View; label: string }[] = [
 ]
 
 export function Shell({ onSignOut }: { onSignOut: () => void }) {
+  const { canManage, current, complete, loading, observation } = useObservation()
+  const healthy =
+    current &&
+    complete &&
+    (!observation ||
+      (observation.runtime.read_available &&
+        (observation.backend !== 'local' || observation.runtime.db_size_available)))
   const [view, setView] = useState<View>('overview')
   const [detail, setDetail] = useState<DetailTarget | null>(null)
   const [info, setInfo] = useState<Discovery | null>(null)
@@ -38,14 +46,17 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
   }, [])
 
   const openQueue = (name: string) => {
+    if (!canManage) return
     setView('queues')
     setDetail({ kind: 'queue', name })
   }
   const openSub = (topic: string, name: string) => {
+    if (!canManage) return
     setView('topics')
     setDetail({ kind: 'subscription', name, topic })
   }
   const go = (v: View) => {
+    if (!canManage && v !== 'overview' && v !== 'metrics') return
     setDetail(null)
     setView(v)
   }
@@ -56,7 +67,7 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
         <div className="mx-auto flex h-full min-h-14 max-w-6xl flex-wrap items-center gap-x-7 gap-y-2 px-6 py-2">
           <Logo />
           <nav className="flex h-10 items-stretch gap-4 overflow-x-auto">
-            {NAV.map((n) => (
+            {NAV.filter((n) => canManage || n.id === 'overview' || n.id === 'metrics').map((n) => (
               <NavItem key={n.id} active={view === n.id} onClick={() => go(n.id)}>
                 {n.label}
               </NavItem>
@@ -66,9 +77,9 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
             <TimeFormatToggle />
             <div
               className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"
-              title={info?.status ?? 'online'}
+              title={current ? (healthy ? 'sample available' : 'partial observation') : 'availability unknown'}
             >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-ok" />
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${healthy ? 'bg-ok' : 'bg-warn'}`} />
               <span className="text-faint">
                 {info?.name ?? 'broker'}
                 {info?.version ? ` ${info.version}` : ''}
@@ -82,7 +93,11 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-7">
-        {detail ? (
+        {loading ? (
+          <p className="text-sm text-muted-foreground">loading observation…</p>
+        ) : !canManage && view !== 'metrics' ? (
+          <Overview onOpenQueue={openQueue} onOpenSub={openSub} onNav={go} />
+        ) : detail && canManage ? (
           <Detail target={detail} onBack={() => setDetail(null)} onOpenSub={openSub} />
         ) : view === 'overview' ? (
           <Overview onOpenQueue={openQueue} onOpenSub={openSub} onNav={go} />

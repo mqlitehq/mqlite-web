@@ -19,9 +19,10 @@ export function Docs({ onOpenKeys }: { onOpenKeys: () => void }) {
       <Card className="space-y-3 p-5">
         <h2 className="text-sm font-semibold">access keys</h2>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Use a configured administrator token or a managed key with manage permission to sign in. Create separate send
-          keys for producers, listen keys for consumers, or send + listen keys for processors. Manage includes both and
-          can issue and revoke other administrator keys. Permissions apply to the entire broker.
+          Use a configured administrator token or a managed key with manage permission for administration. Configured
+          monitor tokens open read-only overview and metrics views. Create separate send keys for producers, listen keys
+          for consumers, or send + listen keys for processors. Manage includes both and can issue and revoke other
+          administrator keys. Permissions apply to the entire broker.
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           New secrets use mqk_ followed by 64 random lowercase hexadecimal characters (256 bits). Copy the secret once

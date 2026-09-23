@@ -75,7 +75,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
             />
           </div>
           <div>
-            <Label>administrator token</Label>
+            <Label>administrator or monitor token</Label>
             <Input
               type="password"
               autoFocus
@@ -100,8 +100,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
 
         <p className="mt-4 text-[11px] leading-relaxed text-faint">
           Connect with a <span className="text-muted-foreground">manage</span> key or an administrator token from{' '}
-          <span className="text-muted-foreground">MQLITE_TOKENS</span>. The URL is remembered; the login token stays in
-          this tab only.
+          <span className="text-muted-foreground">MQLITE_TOKENS</span>, or a read-only monitor token from{' '}
+          <span className="text-muted-foreground">MQLITE_MONITOR_TOKENS</span>. The URL is remembered; the login token
+          stays in this tab only.
         </p>
       </form>
 

@@ -1,65 +1,57 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { status } from '../lib/api'
-import type { BrokerStatus } from '../lib/types'
-import { Badge, Card, Dot } from './ui'
-import { fmtBytes, fmtMs } from '../lib/format'
+import { useObservation } from '../lib/observation-context.js'
+import { fmtBytes, fmtMs, fmtTime } from '../lib/format.js'
+import { Badge, Card, Dot } from './ui.js'
 
-// A transparent read-out of what the broker is running on — backend, where its data
-// lives (a local path, or a masked remote host), read latency, on-disk footprint, uptime.
-// Everything here is already desensitized server-side (no connection string / token).
 export function SystemPanel() {
-  const [s, setS] = useState<BrokerStatus | null>(null)
-  const [down, setDown] = useState(false)
-
-  useEffect(() => {
-    const load = () =>
-      status()
-        .then((d) => {
-          setS(d)
-          setDown(false)
-        })
-        .catch(() => setDown(true))
-    load()
-    const t = setInterval(load, 5000)
-    return () => clearInterval(t)
-  }, [])
-
-  const healthy = !down && !!s && s.ping_ms >= 0
-  const local = s?.backend === 'local file'
-
+  const { observation: s, current, complete, legacy, canManage, err } = useObservation()
+  const runtimeAvailable = !s || (s.runtime.read_available && (s.backend !== 'local' || s.runtime.db_size_available))
+  const state = !current ? 'unknown' : complete && runtimeAvailable ? 'available' : 'partial'
   return (
-    <Card className="p-4">
+    <Card className="p-4" aria-label="observation status">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Dot state={healthy ? 'active' : 'dead_lettered'} />
-          <span className="text-sm font-medium">{s ? s.backend : 'system'}</span>
-          {s?.remote && <Badge tone="info">remote</Badge>}
-          {s && !s.auth && <Badge tone="warn">auth off</Badge>}
+          <Dot state={state === 'available' ? 'active' : 'locked'} />
+          <span className="text-sm font-medium">{s?.backend ?? (legacy ? 'legacy broker' : 'broker')}</span>
+          <Badge tone={state === 'available' ? 'ok' : 'warn'}>{state}</Badge>
+          {current && !canManage && <Badge tone="info">monitor · read only</Badge>}
         </div>
         <span className="text-xs text-faint">
-          {s ? `mqlite ${s.version} · schema ${s.schema_version} · auth ${s.auth ? 'on' : 'off'}` : ''}
+          {s ? `mqlite ${s.version} · schema ${s.runtime.schema_version}` : ''}
         </span>
       </div>
-
-      <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-        {down ? 'broker unreachable' : (s?.location ?? '…')}
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+        <div>
+          sampled: {s ? fmtTime(s.sampled_at_ms) : 'unknown'}
+          {!current && s ? ' · stale' : ''}
+        </div>
+        <div>last collection success: {s ? fmtTime(s.collection.last_success_at_ms) : 'unknown'}</div>
+        <div>process uptime: {s ? fmtMs(s.sampled_at_ms - s.started_at_ms) : 'unknown'}</div>
       </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Fact label="read latency" value={s ? (s.ping_ms < 0 ? 'error' : `${s.ping_ms} ms`) : '·'} bad={s?.ping_ms === -1} />
-        <Fact label="db on disk" value={s ? (local ? fmtBytes(s.db_size_bytes) : '—') : '·'} />
-        <Fact label="uptime" value={s ? fmtMs(s.uptime_ms) : '·'} />
-        <Fact label="topology" value={s ? `${s.queues} q · ${s.subscriptions} sub` : '·'} />
-      </div>
+      {s && (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+          <div>
+            read latency:{' '}
+            {current && s.runtime.read_available ? `${(s.runtime.ping_seconds * 1000).toFixed(2)} ms` : 'unknown'}
+          </div>
+          <div>
+            db on disk:{' '}
+            {current && s.runtime.db_size_available
+              ? fmtBytes(s.runtime.db_size_bytes)
+              : s.backend === 'local'
+                ? 'unknown'
+                : 'not applicable'}
+          </div>
+        </div>
+      )}
+      {!current && <p className="mt-2 text-xs text-warn">Current measurements are unknown. {err}</p>}
+      {current && !complete && (
+        <p className="mt-2 text-xs text-warn">Queue gauges are unavailable; process counters remain available.</p>
+      )}
+      {legacy && (
+        <p className="mt-2 text-xs text-faint">
+          Legacy broker: per-queue compatibility view. Process counters and collection freshness are unavailable.
+        </p>
+      )}
     </Card>
-  )
-}
-
-function Fact({ label, value, bad }: { label: string; value: ReactNode; bad?: boolean }) {
-  return (
-    <div className="rounded-lg bg-surface-2/60 px-3 py-2">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 text-sm tabular-nums ${bad ? 'text-danger' : 'text-foreground'}`}>{value}</div>
-    </div>
   )
 }
