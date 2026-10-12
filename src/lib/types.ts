@@ -1,6 +1,7 @@
 // Wire shapes — mirror the broker's JSON contract (mqlite/wire). Times are epoch-ms.
 
 export interface QueueInfo {
+  generation?: string // absent on brokers without conditional queue deletion
   name: string
   kind: string // "queue" | "subscription"
   lock_duration_ms: number

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { isObservation, type Observation } from '../src/lib/observation.js'
+import { compactSnapshot, isObservation, type Observation } from '../src/lib/observation.js'
 
 function sample(access: Observation['access'] = 'manage'): Observation {
   const snapshot: Observation = {
@@ -15,7 +15,12 @@ function sample(access: Observation['access'] = 'manage'): Observation {
       db_size_bytes: 0,
       db_size_available: false,
     },
-    collection: { state: 'available', last_success_at_ms: 1800000005000, duration_seconds: 0.002, error_code: '' },
+    collection: {
+      state: 'available',
+      last_success_at_ms: 1800000005000,
+      duration_seconds: 0.002,
+      error_code: '',
+    },
     queue_count: 1,
     subscription_count: 1,
     queues: [
@@ -89,7 +94,12 @@ function sample(access: Observation['access'] = 'manage'): Observation {
       requests: [{ rpc: 'QueueService/Send', code: 'permission_denied', count: 6, duration_seconds: 0.03 }],
       authentication: [{ outcome: 'permission_denied', count: 6 }],
       handler_latency: [
-        { rpc: 'QueueService/Stats', count: 1, sum_seconds: 0.001, buckets: [{ upper_bound_seconds: 1, count: 1 }] },
+        {
+          rpc: 'QueueService/Stats',
+          count: 1,
+          sum_seconds: 0.001,
+          buckets: [{ upper_bound_seconds: 1, count: 1 }],
+        },
       ],
     },
   }
@@ -139,7 +149,10 @@ function sample(access: Observation['access'] = 'manage'): Observation {
       ['ok', ''],
       ['rejected', 'application'],
       ['outcome_unknown', 'outcome_unknown'],
-      ...['canceled', 'closed', 'busy', 'connection', 'full', 'corrupt', 'io', 'other'].map((code) => ['error', code]),
+      ...['canceled', 'closed', 'busy', 'connection', 'full', 'corrupt', 'io', 'other'].map((code) => [
+        'error',
+        code,
+      ]),
     ]
     for (const [outcome, error_code] of outcomes) {
       if (
@@ -214,14 +227,26 @@ function sample(access: Observation['access'] = 'manage'): Observation {
   return snapshot
 }
 interface BrokerFixture {
+  generation?: string
   observation: unknown
   status: number
   calls: string[]
   legacy: boolean
   failedQueue: string
 }
-async function setup(page: Page, access: Observation['access'] = 'manage', loggedIn = true): Promise<BrokerFixture> {
-  const broker: BrokerFixture = { observation: sample(access), status: 200, calls: [], legacy: false, failedQueue: '' }
+async function setup(
+  page: Page,
+  access: Observation['access'] = 'manage',
+  loggedIn = true,
+): Promise<BrokerFixture> {
+  const broker: BrokerFixture = {
+    generation: 'orders-generation-1',
+    observation: sample(access),
+    status: 200,
+    calls: [],
+    legacy: false,
+    failedQueue: '',
+  }
   await page.addInitScript((loggedIn) => {
     localStorage.setItem('mqlite_endpoint', 'https://observe.example.test')
     if (loggedIn) sessionStorage.setItem('mqlite_token', 'fixture')
@@ -240,7 +265,7 @@ async function setup(page: Page, access: Observation['access'] = 'manage', logge
     if (path.endsWith('/ListQueues'))
       return respond({
         queues: [
-          { name: 'orders', kind: 'queue' },
+          { name: 'orders', kind: 'queue', generation: broker.generation },
           { name: 'emails', kind: 'subscription' },
         ],
       })
@@ -248,7 +273,8 @@ async function setup(page: Page, access: Observation['access'] = 'manage', logge
       return respond({ subscriptions: [{ topic: 'events', name: 'emails', expr: '' }] })
     if (path.endsWith('/Stats')) {
       const queue = route.request().postDataJSON().queue
-      if (queue === broker.failedQueue) return respond({ code: 'internal', message: 'collection unavailable' }, 500)
+      if (queue === broker.failedQueue)
+        return respond({ code: 'internal', message: 'collection unavailable' }, 500)
       return respond(sample().queues!.find((q) => q.queue === queue))
     }
     if (path.endsWith('/Peek')) return respond({ messages: [] })
@@ -257,7 +283,7 @@ async function setup(page: Page, access: Observation['access'] = 'manage', logge
   return broker
 }
 function stat(page: Page, label: string) {
-  return page.locator('main').getByText(label, { exact: true }).locator('..')
+  return page.locator('main').getByText(label, { exact: true }).filter({ visible: true }).locator('..')
 }
 
 test('canonical queue, anomaly and process measurements share one request and all domains remain inspectable', async ({
@@ -283,7 +309,9 @@ test('canonical queue, anomaly and process measurements share one request and al
   expect(broker.calls.filter((path) => path.endsWith('/Observe'))).toHaveLength(1)
 })
 
-test('monitor login, reload and navigation never request administrative or message APIs', async ({ page }) => {
+test('monitor login, reload and navigation never request administrative or message APIs', async ({
+  page,
+}) => {
   const broker = await setup(page, 'monitor', false)
   await page.goto('/')
   await page.locator('input[type=password]').fill('fixture-monitor')
@@ -299,7 +327,9 @@ test('monitor login, reload and navigation never request administrative or messa
   expect(broker.calls.every((path) => path === '/' || path.endsWith('/Observe'))).toBe(true)
 })
 
-test('failed DB collection keeps process counters, shows unknown gauges, and recovers on refresh', async ({ page }) => {
+test('failed DB collection keeps process counters, shows unknown gauges, and recovers on refresh', async ({
+  page,
+}) => {
   const broker = await setup(page, 'monitor')
   const partial = sample('monitor')
   partial.queues = null
@@ -333,14 +363,19 @@ for (const [name, mutate] of Object.entries({
     ...s,
     queues: s.queues!.map((q) => ({ ...q, kind: 'unrecognized-kind' })),
   }),
-  'missing maintenance enabled': (s: Observation) => ({ ...s, maintenance: [{ task: 'locks', runs: 0, failures: 0 }] }),
+  'missing maintenance enabled': (s: Observation) => ({
+    ...s,
+    maintenance: [{ task: 'locks', runs: 0, failures: 0 }],
+  }),
 })) {
   test(`malformed successful observation: ${name} is unknown without legacy fallback`, async ({ page }) => {
     const broker = await setup(page)
     broker.observation = mutate(sample())
     await page.goto('/')
     await expect(
-      page.getByText('The broker returned an invalid observation. Availability is unknown.', { exact: false }).first(),
+      page
+        .getByText('The broker returned an invalid observation. Availability is unknown.', { exact: false })
+        .first(),
     ).toBeVisible()
     await expect(stat(page, 'total')).toContainText('unknown')
     expect(broker.calls.some((path) => path.endsWith('/Stats') || path.endsWith('/ListQueues'))).toBe(false)
@@ -354,27 +389,38 @@ for (const status of [403, 500]) {
     await expect(stat(page, 'total')).toContainText('19')
     const before = broker.calls.length
     broker.status = status
-    broker.observation = { code: status === 403 ? 'permission_denied' : 'internal', message: 'observation unavailable' }
+    broker.observation = {
+      code: status === 403 ? 'permission_denied' : 'internal',
+      message: 'observation unavailable',
+    }
     await page.getByRole('button', { name: 'refresh', exact: true }).click()
     await expect(stat(page, 'total')).toContainText('unknown')
     await expect(stat(page, 'RPC errors')).toContainText('unknown')
-    await expect(page.getByText('Last sample is stale; current values are unknown.', { exact: false })).toBeVisible()
+    await expect(
+      page.getByText('Last sample is stale; current values are unknown.', { exact: false }),
+    ).toBeVisible()
     expect(broker.calls.slice(before).every((path) => path.endsWith('/Observe'))).toBe(true)
   })
 }
 
-test('legacy fallback exposes incomplete queue collection instead of summing successful subsets', async ({ page }) => {
+test('legacy fallback exposes incomplete queue collection instead of summing successful subsets', async ({
+  page,
+}) => {
   const broker = await setup(page)
   broker.legacy = true
   broker.failedQueue = 'orders'
   await page.goto('/')
   await expect(stat(page, 'total')).toContainText('unknown')
-  await expect(page.getByText('Legacy queue collection is partial or unavailable.', { exact: false })).toBeVisible()
+  await expect(
+    page.getByText('Legacy queue collection is partial or unavailable.', { exact: false }),
+  ).toBeVisible()
   await expect(page.getByText('dead-letter status unknown')).toBeVisible()
   await page.getByRole('button', { name: 'queues', exact: true }).first().click()
   await expect(page.getByRole('row', { name: /orders/ })).toContainText('unknown')
   await page.getByRole('row', { name: /orders/ }).click()
-  await expect(page.getByText('Legacy queue collection is partial or unavailable.', { exact: false })).toBeVisible()
+  await expect(
+    page.getByText('Legacy queue collection is partial or unavailable.', { exact: false }),
+  ).toBeVisible()
   expect(broker.calls.filter((path) => path.endsWith('/Observe'))).toHaveLength(1)
 })
 
@@ -494,7 +540,12 @@ test('canonical domain labels stay unique, nonempty and forward compatible', () 
   snapshot.http.authentication.push({ outcome: 'future-outcome', count: 0 })
   snapshot.messages.push({ queue: 'orders', event: 'future-event', count: 0 })
   snapshot.storage.operations.push({ ...snapshot.storage.operations[0], operation: 'future-operation' })
-  snapshot.http.requests.push({ rpc: 'FutureService/Read', code: 'future-code', count: 0, duration_seconds: 0 })
+  snapshot.http.requests.push({
+    rpc: 'FutureService/Read',
+    code: 'future-code',
+    count: 0,
+    duration_seconds: 0,
+  })
   expect(isObservation(snapshot)).toBe(true)
   for (const corrupt of [
     (s: Observation) => {
@@ -578,7 +629,9 @@ for (const domain of ['storage', 'requests', 'messages'] as const) {
   })
 }
 
-test('application rejections do not count as storage failures; errors and unknown outcomes do', async ({ page }) => {
+test('application rejections do not count as storage failures; errors and unknown outcomes do', async ({
+  page,
+}) => {
   const broker = await setup(page)
   const snapshot = sample()
   for (const row of snapshot.storage.operations) {
@@ -588,13 +641,16 @@ test('application rejections do not count as storage failures; errors and unknow
   broker.observation = snapshot
   await page.goto('/')
   await expect(stat(page, 'storage errors')).toContainText('0')
-  snapshot.storage.operations.find((r) => r.operation === 'read' && r.error_code === 'connection')!.duration = {
-    bounds_seconds: [1],
-    bucket_counts: [2],
-    count: 2,
-    sum_seconds: 0.02,
-  }
-  snapshot.storage.operations.find((r) => r.operation === 'write' && r.outcome === 'outcome_unknown')!.duration = {
+  snapshot.storage.operations.find((r) => r.operation === 'read' && r.error_code === 'connection')!.duration =
+    {
+      bounds_seconds: [1],
+      bucket_counts: [2],
+      count: 2,
+      sum_seconds: 0.02,
+    }
+  snapshot.storage.operations.find(
+    (r) => r.operation === 'write' && r.outcome === 'outcome_unknown',
+  )!.duration = {
     bounds_seconds: [1],
     bucket_counts: [3],
     count: 3,
@@ -602,4 +658,315 @@ test('application rejections do not count as storage failures; errors and unknow
   }
   await page.getByRole('button', { name: 'refresh', exact: true }).click()
   await expect(stat(page, 'storage errors')).toContainText('5')
+})
+
+test('historical failures show available diagnostics without inventing a cause or current outage', async ({
+  page,
+}) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  snapshot.storage.operations.find((row) => row.error_code === 'connection')!.duration.count = 0
+  snapshot.storage.operations.find((row) => row.error_code === 'connection')!.duration.bucket_counts = [0]
+  const other = snapshot.storage.operations.find(
+    (row) => row.operation === 'read' && row.error_code === 'other',
+  )!
+  other.duration.count = 6
+  other.duration.bucket_counts = [6]
+  broker.observation = snapshot
+  await page.goto('/')
+  await expect(page.getByText('Error counts are historical totals', { exact: false })).toBeVisible()
+  await expect(
+    page.getByRole('table', { name: 'maintenance tasks' }).getByRole('row', { name: /^locks/ }),
+  ).toContainText('4')
+  await expect(page.getByRole('table', { name: 'storage error details' })).toContainText(
+    'Unclassified database/provider error',
+  )
+  await expect(page.getByRole('table', { name: 'RPC error details' })).toContainText('permission_denied')
+  await expect(
+    page.getByText('no failure timestamps or per-task error reasons', { exact: false }),
+  ).toBeVisible()
+  await page.getByText('canonical snapshot · all domains', { exact: true }).click()
+  const pre = page.locator('pre[aria-label="canonical snapshot JSON"]')
+  expect(JSON.parse(await pre.innerText())).toEqual(snapshot)
+  expect((await pre.innerText()).split('\n').length).toBeLessThan(
+    JSON.stringify(snapshot, null, 2).split('\n').length / 2,
+  )
+  await page.getByLabel('domain', { exact: true }).selectOption('maintenance')
+  expect(JSON.parse(await pre.innerText())).toEqual(snapshot.maintenance)
+  await page.getByLabel('domain', { exact: true }).selectOption('storage')
+  expect(JSON.parse(await pre.innerText())).toEqual(snapshot.storage)
+  broker.status = 500
+  await page.getByRole('button', { name: 'refresh', exact: true }).click()
+  await expect(page.getByRole('table', { name: 'storage error details' })).toContainText('unknown')
+  await expect(page.getByText('recorded error details · stale', { exact: true })).toBeVisible()
+})
+
+test('compact snapshot preserves arrays, nested objects and escaped text', () => {
+  const value = { ...sample(), note: 'line 1\nline 2 "quoted"', empty: [], nil: null }
+  expect(JSON.parse(compactSnapshot(value))).toEqual(value)
+})
+
+function diagnosticSample(): Observation {
+  const snapshot = sample()
+  const error = {
+    at_ms: 1800000003000,
+    category: 'provider_unavailable',
+    message: 'Database provider returned HTTP 503 (Service Unavailable).',
+    fingerprint: '0123456789abcdef01234567',
+    http_status: 503,
+    sqlite_code: 0,
+  }
+  snapshot.maintenance[0].diagnostics = {
+    last_outcome: 'failed',
+    last_run_at_ms: error.at_ms,
+    consecutive_failures: 1,
+    recovered_at_ms: 0,
+    recent_failures: [{ stage: 'reclaim_locks', error }],
+  }
+  snapshot.storage.operations.find((row) => row.error_code === 'connection')!.last_error = error
+  return snapshot
+}
+
+test('diagnostics identify the failed step and recovery while retaining historical counts', async ({
+  page,
+}) => {
+  const broker = await setup(page)
+  const snapshot = diagnosticSample()
+  broker.observation = snapshot
+  await page.goto('/')
+  const task = page.getByRole('table', { name: 'maintenance tasks' }).getByRole('row', { name: /^locks/ })
+  await expect(task).toContainText('failed · 1 consecutive')
+  await expect(page.getByLabel('maintenance failure history')).toContainText('locks / reclaim_locks')
+  await expect(page.getByLabel('maintenance failure history')).toContainText('HTTP 503')
+  await expect(page.getByLabel('maintenance failure history')).toContainText('0123456789abcdef01234567')
+  await expect(page.getByRole('table', { name: 'storage error details' })).toContainText(
+    'provider_unavailable',
+  )
+  snapshot.maintenance[0].diagnostics!.last_outcome = 'ok'
+  snapshot.maintenance[0].diagnostics!.consecutive_failures = 0
+  snapshot.maintenance[0].diagnostics!.recovered_at_ms = snapshot.sampled_at_ms
+  await page.getByRole('button', { name: 'refresh', exact: true }).click()
+  await expect(task).toContainText('recovered')
+  await expect(stat(page, 'maintenance failures')).toContainText('1')
+  await expect(page.getByLabel('maintenance failure history')).toContainText('HTTP 503')
+  broker.status = 500
+  await page.getByRole('button', { name: 'refresh', exact: true }).click()
+  await expect(task).toContainText('unknown · stale')
+  await expect(task).not.toContainText('recovered')
+})
+
+test('diagnostics remain optional for old brokers but validate all present fields', () => {
+  expect(isObservation(sample())).toBe(true)
+  const valid = diagnosticSample()
+  expect(isObservation(valid)).toBe(true)
+  const objects = (s: Observation) => [
+    s.maintenance[0].diagnostics!,
+    s.maintenance[0].diagnostics!.recent_failures[0],
+    s.maintenance[0].diagnostics!.recent_failures[0].error,
+    s.storage.operations.find((row) => row.last_error)!.last_error!,
+  ]
+  for (const [index, object] of objects(valid).entries()) {
+    for (const key of Object.keys(object)) {
+      const invalid = diagnosticSample()
+      delete (objects(invalid)[index] as unknown as Record<string, unknown>)[key]
+      expect(isObservation(invalid), `missing diagnostic ${index}.${key}`).toBe(false)
+    }
+  }
+  for (const mutate of [
+    (s: Observation) => {
+      s.maintenance[0].diagnostics = null as never
+    },
+    (s: Observation) => {
+      s.maintenance[0].diagnostics!.consecutive_failures = 999
+    },
+    (s: Observation) => {
+      s.maintenance[0].diagnostics!.recent_failures = Array(9).fill(
+        s.maintenance[0].diagnostics!.recent_failures[0],
+      )
+    },
+    (s: Observation) => {
+      s.maintenance[0].diagnostics!.recent_failures[0].error.http_status = 999
+    },
+    (s: Observation) => {
+      s.maintenance[0].diagnostics!.recent_failures[0].error.fingerprint = 'invalid'
+    },
+  ]) {
+    const invalid = diagnosticSample()
+    mutate(invalid)
+    expect(isObservation(invalid)).toBe(false)
+  }
+})
+
+// Queue lifecycle actions must preserve messages even if the last snapshot was empty.
+test('empty queue deletion requires its exact name and returns to refreshed inventory', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const broker = await setup(page)
+  const snapshot = sample()
+  Object.assign(snapshot.queues![0], {
+    active: 0,
+    locked: 0,
+    scheduled: 0,
+    deferred: 0,
+    dead_lettered: 0,
+    unexpected: 0,
+    total: 0,
+    oldest_message_age_ms: 0,
+  })
+  broker.observation = snapshot
+  let deleted = 0
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ name: 'orders', generation: 'orders-generation-1' })
+    deleted++
+    snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"deleted":true}' })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  const confirm = dialog.getByRole('button', { name: 'confirm delete', exact: true })
+  await expect(confirm).toBeDisabled()
+  await dialog.getByLabel('Type the queue name to confirm').fill('order')
+  await expect(confirm).toBeDisabled()
+  await dialog.getByRole('button', { name: 'cancel', exact: true }).click()
+  expect(deleted).toBe(0)
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await confirm.click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('row').filter({ hasText: 'orders' })).toHaveCount(0)
+  expect(deleted).toBe(1)
+})
+
+for (const reply of [
+  'queue_not_empty',
+  'unsupported',
+  'outcome_unknown',
+  'malformed_success',
+  'queue_changed',
+]) {
+  test(`queue deletion reports ${reply} without dismissing the action`, async ({ page }) => {
+    const broker = await setup(page)
+    const snapshot = sample()
+    Object.assign(snapshot.queues![0], {
+      active: 0,
+      locked: 0,
+      scheduled: 0,
+      deferred: 0,
+      dead_lettered: 0,
+      unexpected: 0,
+      total: 0,
+      oldest_message_age_ms: 0,
+    })
+    broker.observation = snapshot
+    await page.route('**/mqlite.v1.AdminService/DeleteQueue', (route) =>
+      route.fulfill({
+        status:
+          reply === 'malformed_success'
+            ? 200
+            : reply === 'queue_not_empty' || reply === 'queue_changed'
+              ? 409
+              : reply === 'unsupported'
+                ? 404
+                : 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: reply === 'unsupported' ? 'not_found' : reply,
+          message:
+            reply === 'unsupported'
+              ? 'no such path: DeleteQueue'
+              : reply === 'queue_not_empty'
+                ? 'Queue now contains messages.'
+                : 'commit result unknown',
+        }),
+      }),
+    )
+    await page.goto('/')
+    await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+    await page.getByRole('row').filter({ hasText: 'orders' }).click()
+    await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+    await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+    await expect(dialog.getByRole('alert')).toContainText(
+      reply === 'queue_not_empty'
+        ? 'Queue now contains messages'
+        : reply === 'queue_changed'
+          ? 'This queue was replaced'
+          : reply === 'unsupported'
+            ? 'does not support'
+            : 'could not be confirmed',
+    )
+    await expect(dialog).toBeVisible()
+    if (reply === 'outcome_unknown' || reply === 'malformed_success' || reply === 'queue_changed')
+      await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
+  })
+}
+
+test('nonempty queue deletion is disabled before submission', async ({ page }) => {
+  const broker = await setup(page)
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
+  await expect(dialog).toContainText('still contains')
+  expect(broker.calls.some((path) => path.endsWith('/DeleteQueue'))).toBe(false)
+})
+
+test('open deletion dialog stays bound to its original queue after metadata refresh', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  Object.assign(snapshot.queues![0], {
+    active: 0,
+    locked: 0,
+    scheduled: 0,
+    deferred: 0,
+    dead_lettered: 0,
+    unexpected: 0,
+    total: 0,
+    oldest_message_age_ms: 0,
+  })
+  broker.observation = snapshot
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ name: 'orders', generation: 'orders-generation-1' })
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'queue_changed', message: 'replaced' }),
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  broker.generation = 'orders-generation-2'
+  const reads = broker.calls.filter((p) => p.endsWith('/ListQueues')).length
+  // Simulate a background refresh while the native modal keeps the page inert.
+  await page
+    .getByRole('button', { name: 'refresh', exact: true })
+    .evaluate((button: HTMLButtonElement) => button.click())
+  await expect.poll(() => broker.calls.filter((p) => p.endsWith('/ListQueues')).length).toBeGreaterThan(reads)
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('This queue was replaced')
+})
+
+test('older broker without queue identities cannot submit a deletion', async ({ page }) => {
+  const broker = await setup(page)
+  broker.generation = undefined
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await expect(dialog).toContainText('Queue identity is unavailable')
+  await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
 })
