@@ -18,6 +18,7 @@ import {
 import { FilterEditor } from '../components/FilterEditor.js'
 import { PublishPanel, SendPanel } from '../components/Composer.js'
 import { Receiver } from '../components/Receiver.js'
+import { DeleteQueue } from '../components/delete-queue.js'
 import { DLQActions } from '../components/DLQActions.js'
 import { DeferredSettle } from '../components/DeferredSettle.js'
 import { MessageDetail } from '../components/MessageDetail.js'
@@ -42,7 +43,7 @@ export function Detail({
   const { name, kind, topic } = target
   const isSub = kind === 'subscription'
 
-  const { metrics, reload: loadStats, err: observationError } = useTopology()
+  const { queues, metrics, reload: loadStats, err: observationError } = useTopology()
   const m = metrics[name]
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
@@ -126,11 +127,14 @@ export function Detail({
   return (
     <div className="mx-auto max-w-5xl">
       {observationError && <ErrorBanner message={observationError} />}
-      <button onClick={onBack} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+      <button
+        onClick={onBack}
+        className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← {isSub ? 'topics' : 'queues'}
       </button>
 
-      <div className="mt-1">
+      <div className="mt-1 [&>header]:flex-col [&>header]:items-stretch sm:[&>header]:flex-row sm:[&>header]:items-end">
         <PageHeader
           icon={<span className="text-faint">{isSub ? '◇' : '▸'}</span>}
           title={
@@ -158,6 +162,18 @@ export function Detail({
           }
           actions={
             <>
+              {!isSub && (
+                <DeleteQueue
+                  name={name}
+                  generation={queues.find((q) => q.name === name)?.generation}
+                  total={m?.total}
+                  onRefresh={loadStats}
+                  onDeleted={() => {
+                    loadStats()
+                    onBack()
+                  }}
+                />
+              )}
               <Button variant="outline" size="sm" onClick={refresh}>
                 refresh
               </Button>
@@ -220,7 +236,11 @@ export function Detail({
             </div>
           ) : (
             <div className="mt-2">
-              {expr === null ? <span className="text-xs text-faint">loading…</span> : <FilterCode expr={expr} />}
+              {expr === null ? (
+                <span className="text-xs text-faint">loading…</span>
+              ) : (
+                <FilterCode expr={expr} />
+              )}
             </div>
           )}
         </Card>
@@ -238,7 +258,7 @@ export function Detail({
 
       {showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refresh} />}
 
-      <div className="mt-5 flex items-center gap-1 border-b border-border">
+      <div className="mt-5 flex flex-wrap items-center gap-1 border-b border-border">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -257,7 +277,12 @@ export function Detail({
         ))}
         <div className="ml-auto flex items-center gap-2 pr-1">
           {tab === 'active' && (
-            <Button variant="outline" size="sm" disabled={busy || !m?.active} onClick={() => setShowRecv((v) => !v)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || !m?.active}
+              onClick={() => setShowRecv((v) => !v)}
+            >
               receive
             </Button>
           )}
@@ -326,7 +351,9 @@ export function Detail({
                         {msg.properties && Object.keys(msg.properties).length > 0 && (
                           <div className="text-faint">{Object.keys(msg.properties).length} props</div>
                         )}
-                        {!msg.subject && !msg.message_id && !msg.group_id && <span className="text-faint">—</span>}
+                        {!msg.subject && !msg.message_id && !msg.group_id && (
+                          <span className="text-faint">—</span>
+                        )}
                       </td>
                       {tab === 'dead_lettered' && (
                         <td className="px-3 py-2 text-xs text-danger/90">
@@ -357,7 +384,9 @@ export function Detail({
                               >
                                 cancel — delete this scheduled message
                               </Button>
-                              <span className="text-[11px] text-faint">removes it before it ever activates</span>
+                              <span className="text-[11px] text-faint">
+                                removes it before it ever activates
+                              </span>
                             </div>
                           )}
                           {msg.state === 'deferred' && msg.seq_number != null && (

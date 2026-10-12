@@ -71,7 +71,11 @@ async function rpc<T>(path: string, body?: unknown, token?: string, signal?: Abo
     }
   }
   if (!res.ok) {
-    throw new ApiError(res.status, (json.code as string) ?? 'error', (json.message as string) ?? res.statusText)
+    throw new ApiError(
+      res.status,
+      (json.code as string) ?? 'error',
+      (json.message as string) ?? res.statusText,
+    )
   }
   return json as T
 }
@@ -144,7 +148,11 @@ export function observeUnsupported(error: unknown): boolean {
 export async function observe(token?: string): Promise<Observation> {
   const result = await rpc<unknown>('/mqlite.v1.AdminService/Observe', {}, token, AbortSignal.timeout(15000))
   if (!isObservation(result))
-    throw new ApiError(502, 'invalid_response', 'The broker returned an invalid observation. Availability is unknown.')
+    throw new ApiError(
+      502,
+      'invalid_response',
+      'The broker returned an invalid observation. Availability is unknown.',
+    )
   return result
 }
 
@@ -176,6 +184,17 @@ export function subscribe(topic: string, name: string, expr?: string): Promise<u
     ...(expr ? { filter: { expr } } : {}),
   })
 }
+// The broker enforces emptiness transactionally, including in-flight and delayed messages.
+export async function deleteQueue(name: string, generation: string): Promise<void> {
+  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', { name, generation })
+  if (!record(result) || result.deleted !== true)
+    throw new ApiError(
+      502,
+      'outcome_unknown',
+      'Deletion acknowledgement missing. Refresh the queue list before retrying.',
+    )
+}
+
 // Desensitized runtime snapshot (backend, redacted location, latency, footprint, …).
 export function status(): Promise<BrokerStatus> {
   return rpc<BrokerStatus>('/mqlite.v1.AdminService/Status', {})
@@ -193,7 +212,9 @@ export async function listSubscriptions(): Promise<Subscription[]> {
     !('subscriptions' in r) ||
     (r.subscriptions !== null &&
       (!Array.isArray(r.subscriptions) ||
-        r.subscriptions.some((sub) => !record(sub) || typeof sub.name !== 'string' || typeof sub.topic !== 'string')))
+        r.subscriptions.some(
+          (sub) => !record(sub) || typeof sub.name !== 'string' || typeof sub.topic !== 'string',
+        )))
   )
     throw new ApiError(502, 'invalid_response', 'Subscription inventory is unavailable.')
   return r.subscriptions ?? []
@@ -223,14 +244,22 @@ export async function redrive(
   const r = await rpc<{ moved?: number }>('/mqlite.v1.AdminService/Redrive', { queue, ...opts })
   return r.moved ?? 0
 }
-export async function purge(queue: string, opts: { max?: number; older_than_ms?: number } = {}): Promise<number> {
+export async function purge(
+  queue: string,
+  opts: { max?: number; older_than_ms?: number } = {},
+): Promise<number> {
   const r = await rpc<{ purged?: number }>('/mqlite.v1.AdminService/Purge', { queue, ...opts })
   return r.purged ?? 0
 }
 
 // ── QueueService ─────────────────────────────────────────────────────────────
 export async function stats(queue: string): Promise<Metrics> {
-  const value = await rpc<Metrics>('/mqlite.v1.QueueService/Stats', { queue }, undefined, AbortSignal.timeout(5000))
+  const value = await rpc<Metrics>(
+    '/mqlite.v1.QueueService/Stats',
+    { queue },
+    undefined,
+    AbortSignal.timeout(5000),
+  )
   if (
     !record(value) ||
     value.queue !== queue ||
@@ -291,9 +320,19 @@ export function complete(queue: string, seq: number, token: string): Promise<unk
   return rpc('/mqlite.v1.QueueService/Complete', { queue, seq_number: seq, lock_token: token })
 }
 export function abandon(queue: string, seq: number, token: string, delayMs = 0): Promise<unknown> {
-  return rpc('/mqlite.v1.QueueService/Abandon', { queue, seq_number: seq, lock_token: token, delay_ms: delayMs })
+  return rpc('/mqlite.v1.QueueService/Abandon', {
+    queue,
+    seq_number: seq,
+    lock_token: token,
+    delay_ms: delayMs,
+  })
 }
-export function reject(queue: string, seq: number, token: string, reason = 'rejected via console'): Promise<unknown> {
+export function reject(
+  queue: string,
+  seq: number,
+  token: string,
+  reason = 'rejected via console',
+): Promise<unknown> {
   return rpc('/mqlite.v1.QueueService/Reject', {
     queue,
     seq_number: seq,
@@ -326,7 +365,9 @@ function keyMetadata(value: unknown): value is AccessKey {
     !value.permissions.every((permission) => typeof permission === 'string')
   )
     return false
-  if (!['["send"]', '["listen"]', '["send","listen"]', '["manage"]'].includes(JSON.stringify(value.permissions)))
+  if (
+    !['["send"]', '["listen"]', '["send","listen"]', '["manage"]'].includes(JSON.stringify(value.permissions))
+  )
     return false
   if (new TextDecoder().decode(new TextEncoder().encode(value.name)) !== value.name) return false
   if (
@@ -403,7 +444,10 @@ export async function listAccessKeys(
       result.keys.length !== limit)
   )
     throw invalidKeyResponse()
-  return { keys: result.keys, ...(result.next_after_id !== undefined ? { next_after_id: result.next_after_id } : {}) }
+  return {
+    keys: result.keys,
+    ...(result.next_after_id !== undefined ? { next_after_id: result.next_after_id } : {}),
+  }
 }
 
 export async function revokeAccessKey(id: string): Promise<{ ok: boolean }> {

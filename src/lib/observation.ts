@@ -10,6 +10,21 @@ export interface QueueObservation extends Metrics {
   kind: string
   unexpected: number
 }
+export interface ErrorDetail {
+  at_ms: number
+  category: string
+  message: string
+  fingerprint: string
+  http_status: number
+  sqlite_code: number
+}
+export interface MaintenanceDiagnostics {
+  last_outcome: 'never' | 'ok' | 'failed' | 'interrupted'
+  last_run_at_ms: number
+  consecutive_failures: number
+  recovered_at_ms: number
+  recent_failures: { stage: string; error: ErrorDetail }[]
+}
 export interface Observation {
   sampled_at_ms: number
   started_at_ms: number
@@ -34,7 +49,7 @@ export interface Observation {
   queues: QueueObservation[] | null
   messages: { queue: string; event: string; count: number }[]
   storage: {
-    operations: { operation: string; outcome: string; error_code: string; duration: Histogram; retries: number }[]
+    operations: { operation: string; outcome: string; error_code: string; duration: Histogram; retries: number; last_error?: ErrorDetail }[]
     pool: {
       max_open: number
       open: number
@@ -51,6 +66,7 @@ export interface Observation {
     failures: number
     interrupted: number
     last_success_at_ms: number
+    diagnostics?: MaintenanceDiagnostics
     duration: Histogram
   }[]
   filters: { stage: string; count: number }[]
@@ -105,6 +121,43 @@ function histogram(value: unknown): value is unknown & Histogram {
         (i === 0 || counts[i] >= counts[i - 1]),
     )
   )
+}
+
+function validErrorDetail(value: unknown): boolean {
+  return (
+    fields(value, ['category', 'message', 'fingerprint'], ['at_ms', 'http_status', 'sqlite_code']) &&
+    !!value.category &&
+    String(value.category).length <= 64 &&
+    !!value.message &&
+    String(value.message).length <= 512 &&
+    /^[0-9a-f]{24}$/.test(String(value.fingerprint)) &&
+    (value.http_status === 0 || (Number(value.http_status) >= 100 && Number(value.http_status) <= 599))
+  )
+}
+function validMaintenanceDiagnostics(value: unknown, runs: number, failures: number): boolean {
+  if (
+    !fields(value, ['last_outcome'], ['last_run_at_ms', 'consecutive_failures', 'recovered_at_ms']) ||
+    Number(value.consecutive_failures) > failures ||
+    !Array.isArray(value.recent_failures) ||
+    value.recent_failures.length > 8 ||
+    !value.recent_failures.every(
+      (r) =>
+        fields(r, ['stage'], []) && !!r.stage && String(r.stage).length <= 64 && validErrorDetail(r.error),
+    )
+  )
+    return false
+  switch (value.last_outcome) {
+    case 'never':
+      return runs === 0 && value.consecutive_failures === 0
+    case 'ok':
+      return runs > 0 && value.consecutive_failures === 0
+    case 'failed':
+      return runs > 0 && Number(value.consecutive_failures) > 0 && value.recovered_at_ms === 0
+    case 'interrupted':
+      return runs > 0
+    default:
+      return false
+  }
 }
 
 function uniqueRows(value: unknown, keys: string[], required: string[] = []): boolean {
@@ -297,13 +350,15 @@ export function isObservation(value: unknown): value is Observation {
         typeof r.enabled === 'boolean' &&
         histogram(r.duration) &&
         Number(r.failures) + Number(r.interrupted) <= Number(r.runs) &&
-        r.duration.count === r.runs,
+        r.duration.count === r.runs &&
+        (r.diagnostics === undefined || validMaintenanceDiagnostics(r.diagnostics, Number(r.runs), Number(r.failures))),
     ) ||
     !record(value.storage) ||
     !fields(value.storage.pool, [], ['max_open', 'open', 'in_use', 'idle', 'wait_count', 'wait_duration_seconds']) ||
     !rows(
       value.storage.operations,
-      (r) => fields(r, ['operation', 'outcome', 'error_code'], ['retries']) && histogram(r.duration),
+      (r) => fields(r, ['operation', 'outcome', 'error_code'], ['retries']) && histogram(r.duration) &&
+        (r.last_error === undefined || ((r.outcome === 'error' || r.outcome === 'outcome_unknown') && r.duration.count > 0 && validErrorDetail(r.last_error))),
     )
   )
     return false
@@ -362,5 +417,31 @@ export function queueTotals(metrics: Record<string, Metrics>, complete: boolean)
       total: a.total + m.total,
     }),
     { active: 0, locked: 0, scheduled: 0, deferred: 0, dlq: 0, total: 0 },
+  )
+}
+
+// Keep flat counter rows and numeric arrays on one line without dropping fields.
+export function compactSnapshot(value: unknown, depth = 0): string {
+  const flat = JSON.stringify(value)
+  if (flat === undefined) return 'null'
+  if (value === null || typeof value !== 'object' || flat.length + depth * 2 <= 140) return flat
+  const indent = '  '.repeat(depth)
+  const childIndent = indent + '  '
+  if (Array.isArray(value))
+    return (
+      '[\n' +
+      value.map((item) => childIndent + compactSnapshot(item, depth + 1)).join(',\n') +
+      '\n' +
+      indent +
+      ']'
+    )
+  return (
+    '{\n' +
+    Object.entries(value)
+      .map(([key, item]) => childIndent + JSON.stringify(key) + ': ' + compactSnapshot(item, depth + 1))
+      .join(',\n') +
+    '\n' +
+    indent +
+    '}'
   )
 }
