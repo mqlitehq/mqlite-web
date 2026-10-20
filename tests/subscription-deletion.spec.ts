@@ -64,6 +64,8 @@ function fullSubscriptionPage() {
     name: `archive-${String(index).padStart(4, '0')}`,
     expr: '',
     state: 'active',
+    created_at_ms: 1,
+    expires_at_ms: 0,
   }))
 }
 
@@ -147,7 +149,9 @@ test('wrong-topic not_found becomes read-only reconciliation instead of another 
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        subscriptions: [{ topic: 'events', name: 'emails', expr: '', state: 'active' }],
+        subscriptions: [
+          { topic: 'events', name: 'emails', expr: '', state: 'active', created_at_ms: 1, expires_at_ms: 0 },
+        ],
         total: 1,
       }),
     })
@@ -216,7 +220,9 @@ test('pending subscription deletion scans scoped pages and never replays delete'
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          subscriptions: [{ topic: 'events', name: 'emails', expr: '', state: 'deleting' }],
+          subscriptions: [
+            { topic: 'events', name: 'emails', expr: '', state: 'deleting', created_at_ms: 1, expires_at_ms: 0 },
+          ],
           total: 1001,
         }),
       })
@@ -283,7 +289,9 @@ for (const outcome of ['server error', 'redirect', 'transport', 'malformed ackno
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          subscriptions: [{ topic: 'events', name: 'emails', expr: '', state: 'deleting' }],
+          subscriptions: [
+            { topic: 'events', name: 'emails', expr: '', state: 'deleting', created_at_ms: 1, expires_at_ms: 0 },
+          ],
           total: 1,
         }),
       })
@@ -389,6 +397,85 @@ test('reconciliation rejects a first page missing its required cursor and never 
   await expect(dialog).toBeVisible()
   expect(deletes).toBe(1)
   expect(pageRequests).toEqual([{ topic: 'events', limit: 1000, include_deleting: true }])
+})
+
+test('subscription creation sends an optional fixed TTL and omits it for a permanent subscription', async ({ page }) => {
+  await setup(page)
+  const requests: Record<string, unknown>[] = []
+  await page.route('**/mqlite.v1.AdminService/Subscribe', async (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: '+ subscription', exact: true }).click()
+  await page.getByPlaceholder('events').fill('requests')
+  await page.getByPlaceholder('eu-orders').fill('reply-worker')
+  await page.getByLabel('subscription lifetime', { exact: true }).fill('2')
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect.poll(() => requests.length).toBe(1)
+  expect(requests[0]).toEqual({ topic: 'requests', name: 'reply-worker', ttl_ms: 120_000 })
+
+  await page.getByRole('button', { name: '+ subscription', exact: true }).click()
+  await page.getByPlaceholder('events').fill('events')
+  await page.getByPlaceholder('eu-orders').fill('durable-worker')
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect.poll(() => requests.length).toBe(2)
+  expect(requests[1]).toEqual({ topic: 'events', name: 'durable-worker' })
+})
+
+test('subscription creation refuses a non-positive or fractional-millisecond TTL before sending', async ({ page }) => {
+  await setup(page)
+  let requests = 0
+  await page.route('**/mqlite.v1.AdminService/Subscribe', async (route) => {
+    requests++
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: '+ subscription', exact: true }).click()
+  await page.getByPlaceholder('events').fill('requests')
+  await page.getByPlaceholder('eu-orders').fill('reply-worker')
+  await page.getByLabel('subscription lifetime unit').selectOption('1000')
+  await page.getByLabel('subscription lifetime', { exact: true }).fill('0')
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('positive whole-millisecond')
+  expect(requests).toBe(0)
+
+  await page.getByLabel('subscription lifetime', { exact: true }).fill('0.0001')
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('positive whole-millisecond')
+  expect(requests).toBe(0)
+})
+
+test('reconciliation rejects lifecycle rows without explicit fixed-lifetime fields', async ({ page }) => {
+  const broker = await setup(page)
+  broker.total = 0
+  let deletes = 0
+  await page.route('**/mqlite.v1.AdminService/DeleteSubscription', async (route) => {
+    deletes++
+    broker.active = false
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"deleted":false,"state":"deleting"}' })
+  })
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [{ topic: 'events', name: 'emails', expr: '', state: 'deleting' }],
+        total: 1,
+      }),
+    })
+  })
+
+  const dialog = await openDelete(page)
+  await confirmExact(dialog)
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await dialog.getByRole('button', { name: 'check outcome', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Paged subscription inventory is unavailable')
+  expect(deletes).toBe(1)
 })
 
 test('older brokers keep the subscription visible and explain that deletion is unsupported', async ({ page }) => {

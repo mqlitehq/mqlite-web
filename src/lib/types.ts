@@ -79,6 +79,14 @@ export interface Subscription {
   state?: 'active' | 'deleting'
 }
 
+// Lifecycle-aware inventory is a separate, strict contract. The legacy complete
+// list above deliberately keeps its original three-field wire shape.
+export interface SubscriptionPageItem extends Subscription {
+  state: 'active' | 'deleting'
+  created_at_ms: number
+  expires_at_ms: number // 0 = permanent; otherwise the fixed absolute deadline
+}
+
 export interface ListSubscriptionsOptions {
   topic?: string
   after?: string
@@ -87,7 +95,7 @@ export interface ListSubscriptionsOptions {
 }
 
 export interface SubscriptionPage {
-  subscriptions: Subscription[]
+  subscriptions: SubscriptionPageItem[]
   total: number
   next_after?: string
 }
