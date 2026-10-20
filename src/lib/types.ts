@@ -8,6 +8,8 @@ export interface QueueInfo {
   max_delivery_count: number
   default_ttl_ms: number
   dedup_window_ms: number
+  state?: 'active' | 'deleting'
+  expires_at_ms?: number
 }
 
 export interface Metrics {
@@ -69,6 +71,29 @@ export interface Subscription {
   topic: string
   name: string
   expr: string // filter expression; "" = match all
+  generation?: string
+  ttl_ms?: number
+  expires_at_ms?: number
+  state?: 'active' | 'deleting'
+}
+
+export interface SubscriptionOptions {
+  ttl_ms?: number
+  generation?: string
+  request_id?: string
+  request_expires_at_ms?: number
+}
+
+export interface SubscriptionPage {
+  subscriptions: Subscription[]
+  total: number
+  next_after?: string
+}
+
+export interface DeleteResult {
+  deleted: boolean
+  state: 'deleted' | 'deleting'
+  generation?: string
 }
 
 export interface FilterTest {

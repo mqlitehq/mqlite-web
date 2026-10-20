@@ -1,8 +1,8 @@
 import { useTopology } from '../lib/useTopology.js'
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { bodySize, cancel, decodeBody, listSubscriptions, peek, subscribe } from '../lib/api.js'
+import { bodySize, cancel, decodeBody, listSubscriptions, listSubscriptionsPage, peek, subscribe } from '../lib/api.js'
 import type { DetailTarget } from '../components/Shell.js'
-import type { MessageState, WireMessage } from '../lib/types.js'
+import type { MessageState, WireMessage, Subscription } from '../lib/types.js'
 import {
   Badge,
   Button,
@@ -43,7 +43,12 @@ export function Detail({
   const { name, kind, topic } = target
   const isSub = kind === 'subscription'
 
-  const { queues, metrics, reload: loadStats, err: observationError } = useTopology()
+  const { queues, metrics, observation, reload: loadStats, err: observationError } = useTopology()
+  const lifecycle = Number(observation?.runtime.schema_version) >= 6
+  const [generation, setGeneration] = useState<string>()
+  const [subscription, setSubscription] = useState<Subscription>()
+  const resolvedTopic = topic || subscription?.topic
+  const queueInfo = queues.find((q) => q.name === name)
   const m = metrics[name]
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
@@ -58,10 +63,27 @@ export function Detail({
 
   const loadExpr = useCallback(() => {
     if (!isSub) return
-    listSubscriptions()
-      .then((subs) => setExpr(subs.find((s) => s.name === name)?.expr ?? ''))
-      .catch(() => setExpr(''))
-  }, [isSub, name])
+    void (async () => {
+      let found: Subscription | undefined
+      if (lifecycle) {
+        let after: string | undefined
+        do {
+          const page = await listSubscriptionsPage({ topic, after, limit: 1000, include_deleting: true })
+          found = page.subscriptions.find((s) => s.name === name)
+          after = page.next_after
+        } while (!found && after)
+      } else {
+        found = (await listSubscriptions()).find((s) => s.name === name)
+      }
+      setSubscription(found)
+      setExpr(found?.expr ?? '')
+      setGeneration((current) => current ?? found?.generation)
+    })().catch((error) => setErr(error instanceof Error ? error.message : 'Subscription inventory unavailable.'))
+  }, [isSub, name, topic, lifecycle])
+
+  useEffect(() => {
+    if (!isSub) setGeneration((current) => current ?? queueInfo?.generation)
+  }, [isSub, queueInfo?.generation])
 
   const loadMsgs = useCallback(async () => {
     setMsgs(null)
@@ -83,6 +105,7 @@ export function Detail({
   const refresh = () => {
     loadStats()
     loadMsgs()
+    loadExpr()
   }
 
   async function act(fn: () => Promise<string>) {
@@ -100,12 +123,12 @@ export function Detail({
   }
 
   async function saveFilter(next: string) {
-    if (!topic) return
+    if (!resolvedTopic) return
     setBusy(true)
     setErr('')
     setNote('')
     try {
-      await subscribe(topic, name, next.trim() || undefined)
+      await subscribe(resolvedTopic, name, next.trim() || undefined, { generation })
       setExpr(next.trim())
       setEditFilter(false)
       setNote('filter updated')
@@ -139,16 +162,18 @@ export function Detail({
           icon={<span className="text-faint">{isSub ? '◇' : '▸'}</span>}
           title={
             <span className="flex items-center gap-2">
-              {isSub && topic && <span className="text-muted-foreground">{topic}</span>}
-              {isSub && topic && <span className="text-faint">/</span>}
+              {isSub && resolvedTopic && <span className="text-muted-foreground">{resolvedTopic}</span>}
+              {isSub && resolvedTopic && <span className="text-faint">/</span>}
               {name}
               {isSub && <Badge tone="info">subscription</Badge>}
+              {(subscription?.state ?? queueInfo?.state) === 'deleting' && <Badge tone="warn">deleting</Badge>}
             </span>
           }
           subtitle={
             m ? (
               <span>
                 {m.total} total
+                {!!subscription?.expires_at_ms && <> · expires <Time ms={subscription.expires_at_ms} /></>}
                 {m.oldest_message_age_ms > 0 && (
                   <>
                     {' · oldest '}
@@ -162,10 +187,10 @@ export function Detail({
           }
           actions={
             <>
-              {!isSub && (
                 <DeleteQueue
                   name={name}
-                  generation={queues.find((q) => q.name === name)?.generation}
+                  topic={isSub ? resolvedTopic : undefined}
+                  generation={generation}
                   total={m?.total}
                   onRefresh={loadStats}
                   onDeleted={() => {
@@ -173,7 +198,6 @@ export function Detail({
                     onBack()
                   }}
                 />
-              )}
               <Button variant="outline" size="sm" onClick={refresh}>
                 refresh
               </Button>
@@ -247,16 +271,16 @@ export function Detail({
       )}
 
       {panel &&
-        (isSub && topic ? (
+        (isSub && resolvedTopic ? (
           <Card className="mt-4 p-4">
-            <div className="mb-3 text-sm font-medium">publish to {topic}</div>
-            <PublishPanel topic={topic} bordered={false} onPublished={refresh} />
+            <div className="mb-3 text-sm font-medium">publish to {resolvedTopic}</div>
+            <PublishPanel topic={resolvedTopic} bordered={false} onPublished={refresh} />
           </Card>
         ) : (
-          <SendPanel queue={name} onClose={() => setPanel(false)} onSent={refresh} />
+          <SendPanel queue={name} generation={generation} onClose={() => setPanel(false)} onSent={refresh} />
         ))}
 
-      {showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refresh} />}
+      {showRecv && <Receiver queue={name} generation={generation} onClose={() => setShowRecv(false)} onChanged={refresh} />}
 
       <div className="mt-5 flex flex-wrap items-center gap-1 border-b border-border">
         {TABS.map((t) => (
@@ -392,6 +416,7 @@ export function Detail({
                           {msg.state === 'deferred' && msg.seq_number != null && (
                             <div className="border-t border-border bg-surface-2/40 px-4 py-2">
                               <DeferredSettle
+                                generation={generation}
                                 queue={name}
                                 seq={msg.seq_number}
                                 onDone={() => {

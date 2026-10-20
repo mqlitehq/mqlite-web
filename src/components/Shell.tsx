@@ -98,7 +98,7 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
         ) : !canManage && view !== 'metrics' ? (
           <Overview onOpenQueue={openQueue} onOpenSub={openSub} onNav={go} />
         ) : detail && canManage ? (
-          <Detail target={detail} onBack={() => setDetail(null)} onOpenSub={openSub} />
+          <Detail key={`${detail.kind}:${detail.topic ?? ''}:${detail.name}`} target={detail} onBack={() => setDetail(null)} onOpenSub={openSub} />
         ) : view === 'overview' ? (
           <Overview onOpenQueue={openQueue} onOpenSub={openSub} onNav={go} />
         ) : view === 'queues' ? (

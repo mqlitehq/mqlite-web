@@ -95,6 +95,34 @@ Rotate by creating a replacement, switching clients, and revoking the old key.
 Backups contain key state; restoring an older backup can re-enable credentials
 revoked afterward, so audit and rotate keys before reopening access.
 
+## Queue and subscription lifecycle
+
+Schema 6 brokers support subscription deletion, fixed subscription TTL, and paged
+subscription inventory. The topics view shows a bounded overview of the first
+1,000 retained subscriptions; its server-side list can filter by exact topic and
+page through the complete inventory, including subscriptions awaiting deletion.
+Counts in this view include these retained reservations. A topic disappears when
+its last live subscription is retired.
+
+Deletion requires the generation shown for the selected queue or subscription.
+The default rejects any remaining messages, including locked messages. Selecting
+**force** explicitly discards them. A **deleting** result reserves the name until
+cleanup finishes; **check deletion** keeps the original generation so it cannot
+delete a replacement with the same name.
+
+An optional TTL fixes a subscription's expiry at first creation. Retrying creation,
+editing its filter, and receiving traffic do not renew it. Temporary creation
+persists a request ID and absolute retry deadline in this tab before sending. An
+uncertain response retains those exact arguments across reloads; retry the same
+attempt or inspect inventory before finishing it. Creating again is a separate
+attempt, not a renewal. An absent inventory row cannot prove a pending request
+will not complete; finishing an unresolved attempt requires acknowledgement and
+does not cancel it. Temporary receive and filter operations carry the selected
+generation automatically.
+
+Older brokers retain their existing durable subscription workflow. Their legacy
+inventory is unpaged, and lifecycle features require a schema 6 broker.
+
 ## Integrating with the broker
 
 The broker embeds the built console at `/ui/`. This repository remains the source

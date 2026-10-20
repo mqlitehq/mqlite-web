@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { listQueues, listSubscriptions, observe, observeUnsupported, stats } from './api.js'
+import { listQueues, listSubscriptions, listSubscriptionsPage, observe, observeUnsupported, stats } from './api.js'
 import type { Observation } from './observation.js'
 import type { Metrics, QueueInfo, Subscription } from './types.js'
 
@@ -7,6 +7,8 @@ interface ObservationView {
   observation: Observation | null
   queues: QueueInfo[]
   subscriptions: Subscription[]
+  subscriptionTotal: number
+  subscriptionsPartial: boolean
   metrics: Record<string, Metrics>
   complete: boolean
   current: boolean
@@ -21,6 +23,8 @@ const initial: ObservationView = {
   observation: null,
   queues: [],
   subscriptions: [],
+  subscriptionTotal: 0,
+  subscriptionsPartial: false,
   metrics: {},
   complete: false,
   current: false,
@@ -55,10 +59,21 @@ export function ObservationProvider({ children }: { children: ReactNode }) {
       const canManage = legacy.current || observation?.access === 'manage' || observation?.access === 'anonymous'
       let queues: QueueInfo[] = []
       let subscriptions: Subscription[] = []
+      let subscriptionTotal = 0
+      let subscriptionsPartial = false
       let metadataError = ''
       if (canManage) {
         try {
-          ;[queues, subscriptions] = await Promise.all([listQueues(), listSubscriptions()])
+          if (Number(observation?.runtime.schema_version) >= 6) {
+            const [queueResult, page] = await Promise.all([listQueues(), listSubscriptionsPage({ limit: 1000, include_deleting: true })])
+            queues = queueResult
+            subscriptions = page.subscriptions
+            subscriptionTotal = page.total
+            subscriptionsPartial = Boolean(page.next_after)
+          } else {
+            ;[queues, subscriptions] = await Promise.all([listQueues(), listSubscriptions()])
+            subscriptionTotal = subscriptions.length
+          }
         } catch {
           metadataError = 'Administrative topology is unavailable; queue observations remain independent.'
         }
@@ -88,6 +103,8 @@ export function ObservationProvider({ children }: { children: ReactNode }) {
           observation,
           queues,
           subscriptions,
+          subscriptionTotal,
+          subscriptionsPartial,
           metrics,
           complete,
           current: true,

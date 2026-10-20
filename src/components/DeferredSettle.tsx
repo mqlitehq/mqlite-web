@@ -6,7 +6,7 @@ import { Button } from './ui'
 // Per-seq handling for a deferred message: pull this specific one back with
 // ReceiveDeferred (it locks), then settle it — complete / abandon / defer again /
 // reject→DLQ. This is the only way to act on one specific (non-head) message.
-export function DeferredSettle({ queue, seq, onDone }: { queue: string; seq: number; onDone: () => void }) {
+export function DeferredSettle({ queue, seq, generation, onDone }: { queue: string; seq: number; generation?: string; onDone: () => void }) {
   const [held, setHeld] = useState<WireMessage | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -15,7 +15,7 @@ export function DeferredSettle({ queue, seq, onDone }: { queue: string; seq: num
     setBusy(true)
     setErr('')
     try {
-      const got = await receiveDeferred(queue, [seq])
+      const got = await receiveDeferred(queue, [seq], generation)
       if (got[0]) setHeld(got[0])
       else setErr('could not receive — already taken?')
     } catch (e) {

@@ -573,6 +573,32 @@ test('canonical domain labels stay unique, nonempty and forward compatible', () 
   }
 })
 
+test('retired message counters retain their complete event domain', () => {
+  const valid = sample()
+  const retired = valid.messages.filter((row) => row.queue === 'orders').map((row) => ({ ...row, queue: '' }))
+  valid.messages.push(...retired)
+  expect(isObservation(valid)).toBe(true)
+  for (const index of retired.keys()) {
+    const partial = structuredClone(valid)
+    partial.messages.splice(valid.messages.length - retired.length + index, 1)
+    expect(isObservation(partial)).toBe(false)
+  }
+  const duplicate = structuredClone(valid)
+  duplicate.messages.push(retired[0])
+  expect(isObservation(duplicate)).toBe(false)
+})
+
+test('retired message activity keeps the overview available', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  snapshot.messages.push(...snapshot.messages.filter((row) => row.queue === 'orders').map((row) => ({ ...row, queue: '' })))
+  broker.observation = snapshot
+  await page.goto('/')
+  await expect(stat(page, 'total')).not.toContainText('unknown')
+  await page.getByText('message activity details', { exact: false }).click()
+  await expect(page.getByRole('table', { name: 'message activity' })).toContainText('retired / concurrent lifetimes')
+})
+
 test('every required counter row is present before zero can be interpreted', () => {
   const valid = sample()
   expect(valid.storage.operations).toHaveLength(33)
@@ -969,4 +995,109 @@ test('older broker without queue identities cannot submit a deletion', async ({ 
   await dialog.getByLabel('Type the queue name to confirm').fill('orders')
   await expect(dialog).toContainText('Queue identity is unavailable')
   await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
+})
+
+test('force deletion explicitly discards nonempty work and reconciles pending cleanup with the same identity', async ({ page }) => {
+  await setup(page)
+  const requests: unknown[] = []
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
+    requests.push(route.request().postDataJSON())
+    const deleted = requests.length > 1
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ deleted, state: deleted ? 'deleted' : 'deleting', generation: 'orders-generation-1' }) })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
+  await dialog.getByRole('checkbox', { name: /Force delete/ }).check()
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect(dialog.getByRole('status')).toContainText('name remains reserved')
+  await dialog.getByRole('button', { name: 'check deletion', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(requests).toEqual([
+    { name: 'orders', generation: 'orders-generation-1', force: true },
+    { name: 'orders', generation: 'orders-generation-1', force: true },
+  ])
+})
+
+test('temporary subscription receive and deletion preserve generation and topic', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  snapshot.runtime.schema_version = '6'
+  broker.observation = snapshot
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptions', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({
+      total: 1, subscriptions: [{ topic: 'events', name: 'emails', expr: '', generation: 'sub-1', ttl_ms: 60000, expires_at_ms: Date.now() + 60000, state: 'active' }],
+    }),
+  }))
+  let received = false
+  await page.route('**/mqlite.v1.QueueService/Receive', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ queue: 'emails', generation: 'sub-1', max_messages: 1, wait_time_ms: 0 })
+    received = true
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"messages":[]}' })
+  })
+  let deleted = false
+  await page.route('**/mqlite.v1.AdminService/DeleteSubscription', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ topic: 'events', name: 'emails', generation: 'sub-1', force: true })
+    deleted = true
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"deleted":true,"state":"deleted","generation":"sub-1"}' })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails.*temporary/ }).click()
+  await expect(page.getByText(/expires/, { exact: false }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'receive', exact: true }).click()
+  await page.getByRole('button', { name: 'receive next (peek-lock)', exact: true }).click()
+  await expect.poll(() => received).toBe(true)
+  await page.getByRole('button', { name: 'delete subscription', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the subscription name to confirm').fill('emails')
+  await dialog.getByRole('checkbox', { name: /Force delete/ }).check()
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect.poll(() => deleted).toBe(true)
+})
+
+test('temporary creation keeps request and deadline across a lost response and page reload', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  snapshot.runtime.schema_version = '6'
+  broker.observation = snapshot
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptions', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"subscriptions":[],"total":0}',
+  }))
+  const requests: Record<string, unknown>[] = []
+  await page.route('**/mqlite.v1.AdminService/Subscribe', async (route) => {
+    requests.push(route.request().postDataJSON())
+    const first = requests.length === 1
+    await route.fulfill({
+      status: first ? 503 : 200, contentType: 'application/json',
+      body: JSON.stringify(first ? { code: 'outcome_unknown', message: 'acknowledgement lost' } : { topic: 'replies', name: 'temporary', generation: 'reply-1', state: 'active', ttl_ms: 60000 }),
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: '+ subscription', exact: true }).click()
+  await page.getByLabel('subscription topic', { exact: true }).fill('replies')
+  await page.getByLabel('subscription name', { exact: true }).fill('temporary')
+  await page.getByLabel('subscription lifetime in seconds', { exact: true }).fill('60')
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('acknowledgement lost')
+  await page.getByRole('button', { name: 'check inventory', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('An outstanding creation may still complete')
+  await expect(page.getByRole('button', { name: 'finish this attempt', exact: true })).toBeDisabled()
+  await expect(page.getByRole('checkbox', { name: 'I understand that finishing this attempt', exact: false })).toBeVisible()
+  await page.reload()
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: '+ subscription', exact: true }).click()
+  await expect(page.getByLabel('subscription name', { exact: true })).toHaveValue('temporary')
+  await expect(page.getByLabel('subscription lifetime in seconds', { exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: 'retry saved creation', exact: true }).click()
+  await expect.poll(() => requests.length).toBe(2)
+  expect(requests[1]).toEqual(requests[0])
+  expect(requests[0].ttl_ms).toBe(60000)
+  expect(typeof requests[0].request_id).toBe('string')
+  expect(Number(requests[0].request_expires_at_ms)).toBeGreaterThan(Date.now())
 })

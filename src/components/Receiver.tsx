@@ -8,10 +8,12 @@ import { Badge, Button, Card, ErrorBanner } from './ui'
 // The lock is held on the message until you pick one.
 export function Receiver({
   queue,
+  generation,
   onClose,
   onChanged,
 }: {
   queue: string
+  generation?: string
   onClose: () => void
   onChanged: () => void
 }) {
@@ -25,7 +27,7 @@ export function Receiver({
     setErr('')
     setNote('')
     try {
-      const got = await receive(queue, 1, 0)
+      const got = await receive(queue, 1, 0, generation)
       if (got.length === 0) {
         setHeld(null)
         setNote('nothing available to receive')

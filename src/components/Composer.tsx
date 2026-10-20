@@ -89,7 +89,7 @@ const TTL_UNITS = [
 // Full message composer for a direct queue enqueue: every settable message field, an
 // optional per-message TTL (blank = queue default; a message TTL is capped by it), and
 // optional scheduling (a future enqueue time → the message lands in `scheduled` until then).
-export function SendPanel({ queue, onClose, onSent }: { queue: string; onClose: () => void; onSent: () => void }) {
+export function SendPanel({ queue, generation, onClose, onSent }: { queue: string; generation?: string; onClose: () => void; onSent: () => void }) {
   const [body, setBody] = useState('')
   const [subject, setSubject] = useState('')
   const [group, setGroup] = useState('')
@@ -122,6 +122,7 @@ export function SendPanel({ queue, onClose, onSent }: { queue: string; onClose: 
     const ttlMs = Number(ttl) > 0 ? Number(ttl) * Number(ttlUnit) : 0
     try {
       const seqs = await send(queue, {
+        generation,
         bodyText: body,
         ...(subject ? { subject } : {}),
         ...(group ? { group_id: group } : {}),

@@ -18,6 +18,9 @@ import type {
   QueueConfig,
   QueueInfo,
   Subscription,
+  SubscriptionOptions,
+  SubscriptionPage,
+  DeleteResult,
   WireMessage,
 } from './types.js'
 
@@ -177,22 +180,30 @@ export async function listQueues(): Promise<QueueInfo[]> {
 export function createQueue(name: string, config: QueueConfig = {}): Promise<unknown> {
   return rpc('/mqlite.v1.AdminService/CreateQueue', { name, config })
 }
-export function subscribe(topic: string, name: string, expr?: string): Promise<unknown> {
-  return rpc('/mqlite.v1.AdminService/Subscribe', {
+export async function subscribe(topic: string, name: string, expr?: string, options: SubscriptionOptions = {}): Promise<Subscription> {
+  const result = await rpc<Subscription>('/mqlite.v1.AdminService/Subscribe', {
     topic,
     name,
     ...(expr ? { filter: { expr } } : {}),
+    ...options,
   })
+  if (options.request_id && (!record(result) || result.topic !== topic || result.name !== name || typeof result.generation !== 'string' || !result.generation))
+    throw new ApiError(502, 'outcome_unknown', 'Creation acknowledgement is incomplete. Retry the saved request or check inventory.')
+  return result
 }
 // The broker enforces emptiness transactionally, including in-flight and delayed messages.
-export async function deleteQueue(name: string, generation: string): Promise<void> {
-  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', { name, generation })
-  if (!record(result) || result.deleted !== true)
+export async function deleteQueue(name: string, generation: string, force = false, topic?: string): Promise<DeleteResult> {
+  const result = await rpc<unknown>(`/mqlite.v1.AdminService/${topic === undefined ? 'DeleteQueue' : 'DeleteSubscription'}`, {
+    name, generation, ...(force ? { force: true } : {}), ...(topic === undefined ? {} : { topic }),
+  })
+  if (!record(result) || (result.deleted !== true && !(result.deleted === false && result.state === 'deleting')) ||
+      (result.generation !== undefined && result.generation !== generation))
     throw new ApiError(
       502,
       'outcome_unknown',
       'Deletion acknowledgement missing. Refresh the queue list before retrying.',
     )
+  return { deleted: result.deleted === true, state: result.deleted === true ? 'deleted' : 'deleting', generation }
 }
 
 // Desensitized runtime snapshot (backend, redacted location, latency, footprint, …).
@@ -218,6 +229,15 @@ export async function listSubscriptions(): Promise<Subscription[]> {
   )
     throw new ApiError(502, 'invalid_response', 'Subscription inventory is unavailable.')
   return r.subscriptions ?? []
+}
+
+export async function listSubscriptionsPage(options: { topic?: string; after?: string; limit?: number; include_deleting?: boolean } = {}): Promise<SubscriptionPage> {
+  const result = await rpc<SubscriptionPage>('/mqlite.v1.AdminService/ListSubscriptions', { limit: 100, ...options }, undefined, AbortSignal.timeout(5000))
+  if (!record(result) || !Array.isArray(result.subscriptions) || !Number.isSafeInteger(result.total) || result.total < 0 ||
+      result.subscriptions.some((sub) => !record(sub) || typeof sub.topic !== 'string' || typeof sub.name !== 'string') ||
+      (result.next_after !== undefined && typeof result.next_after !== 'string'))
+    throw new ApiError(502, 'invalid_response', 'Subscription page is unavailable.')
+  return result
 }
 
 export interface FilterSample {
@@ -273,13 +293,14 @@ export async function stats(queue: string): Promise<Metrics> {
 
 export async function send(
   queue: string,
-  msg: Partial<WireMessage> & { bodyText?: string; ttlMs?: number; scheduledEnqueueTimeMs?: number },
+  msg: Partial<WireMessage> & { bodyText?: string; ttlMs?: number; scheduledEnqueueTimeMs?: number; generation?: string },
 ): Promise<number[]> {
-  const { bodyText, ttlMs, scheduledEnqueueTimeMs, ...rest } = msg
+  const { bodyText, ttlMs, scheduledEnqueueTimeMs, generation, ...rest } = msg
   const wire: WireMessage = { ...rest }
   if (bodyText !== undefined) wire.body = encodeBody(bodyText)
   const r = await rpc<{ seq_numbers?: number[] }>('/mqlite.v1.QueueService/Send', {
     queue,
+    ...(generation ? { generation } : {}),
     messages: [wire],
     ...(ttlMs && ttlMs > 0 ? { ttl_ms: ttlMs } : {}), // SendRequest.ttl_ms applies to the batch
     ...(scheduledEnqueueTimeMs && scheduledEnqueueTimeMs > 0
@@ -301,18 +322,20 @@ export async function peek(queue: string, state: MessageState | '', max = 50): P
   return r.messages ?? []
 }
 // Pull specific deferred messages back by seq (they hold their lock until you settle).
-export async function receiveDeferred(queue: string, seqs: number[]): Promise<WireMessage[]> {
+export async function receiveDeferred(queue: string, seqs: number[], generation?: string): Promise<WireMessage[]> {
   const r = await rpc<{ messages?: WireMessage[] }>('/mqlite.v1.QueueService/ReceiveDeferred', {
     queue,
     seq_numbers: seqs,
+    ...(generation ? { generation } : {}),
   })
   return r.messages ?? []
 }
-export async function receive(queue: string, max = 10, waitMs = 0): Promise<WireMessage[]> {
+export async function receive(queue: string, max = 10, waitMs = 0, generation?: string): Promise<WireMessage[]> {
   const r = await rpc<{ messages?: WireMessage[] }>('/mqlite.v1.QueueService/Receive', {
     queue,
     max_messages: max,
     wait_time_ms: waitMs,
+    ...(generation ? { generation } : {}),
   })
   return r.messages ?? []
 }

@@ -269,7 +269,7 @@ export function ProcessObservation() {
               <tbody>
                 {effects.map((r) => (
                   <tr key={`${r.queue}:${r.event}`} className="border-t border-border/60">
-                    <td className="py-1">{r.queue}</td>
+                    <td className="py-1">{r.queue || 'retired / concurrent lifetimes'}</td>
                     <td>{r.event}</td>
                     <td className="text-right tabular-nums">{fmtNum(r.count)}</td>
                   </tr>
