@@ -450,6 +450,38 @@ test('subscription creation refuses a non-positive or fractional-millisecond TTL
   expect(requests).toBe(0)
 })
 
+test('subscription creation accepts exactly 10 years and rejects one millisecond more regardless of client time', async ({
+  page,
+}) => {
+  const maxTTL = 3650 * 86_400_000
+  await setup(page)
+  await page.addInitScript(() => {
+    Date.now = () => Number.MAX_SAFE_INTEGER - 1
+  })
+  const requests: Record<string, unknown>[] = []
+  await page.route('**/mqlite.v1.AdminService/Subscribe', async (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: '+ subscription', exact: true }).click()
+  await page.getByPlaceholder('events').fill('requests')
+  await page.getByPlaceholder('eu-orders').fill('reply-worker')
+  await page.getByLabel('subscription lifetime unit').selectOption('1000')
+
+  await page.getByLabel('subscription lifetime', { exact: true }).fill(String(maxTTL / 1000 + 0.001))
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('no longer than 10 years')
+  expect(requests).toHaveLength(0)
+
+  await page.getByLabel('subscription lifetime', { exact: true }).fill(String(maxTTL / 1000))
+  await page.getByRole('button', { name: 'create subscription', exact: true }).click()
+  await expect.poll(() => requests.length).toBe(1)
+  expect(requests[0]).toEqual({ topic: 'requests', name: 'reply-worker', ttl_ms: maxTTL })
+})
+
 test('reconciliation rejects lifecycle rows without explicit fixed-lifetime fields', async ({ page }) => {
   const broker = await setup(page)
   broker.total = 0
