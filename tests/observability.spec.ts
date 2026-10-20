@@ -1003,3 +1003,46 @@ test('pending check cannot delete a same-name replacement', async ({ page }) => 
   await expect(page.getByRole('row').filter({ hasText: 'orders' }).getByText('deleting')).toHaveCount(0)
   expect(requests).toEqual([{ name: 'orders', force: true }])
 })
+
+test('queue deletion does not follow a redirect or issue a second POST', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = sample()
+  Object.assign(snapshot.queues![0], {
+    active: 0,
+    locked: 0,
+    scheduled: 0,
+    deferred: 0,
+    dead_lettered: 0,
+    unexpected: 0,
+    total: 0,
+    oldest_message_age_ms: 0,
+  })
+  broker.observation = snapshot
+  let sourceRequests = 0
+  let redirectRequests = 0
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', (route) => {
+    sourceRequests++
+    return route.fulfill({ status: 307, headers: { location: '/delete-redirect-target' } })
+  })
+  await page.route('**/delete-redirect-target', (route) => {
+    redirectRequests++
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"deleted":true,"state":"deleted"}',
+    })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+
+  await expect(dialog.getByRole('alert')).toContainText('could not be confirmed')
+  await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
+  expect(sourceRequests).toBe(1)
+  expect(redirectRequests).toBe(0)
+})
