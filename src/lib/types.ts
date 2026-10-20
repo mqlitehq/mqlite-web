@@ -75,6 +75,21 @@ export interface Subscription {
   topic: string
   name: string
   expr: string // filter expression; "" = match all
+  // Older brokers omit state; current brokers report active or deleting.
+  state?: 'active' | 'deleting'
+}
+
+export interface ListSubscriptionsOptions {
+  topic?: string
+  after?: string
+  limit?: number
+  include_deleting?: boolean
+}
+
+export interface SubscriptionPage {
+  subscriptions: Subscription[]
+  total: number
+  next_after?: string
 }
 
 export interface FilterTest {

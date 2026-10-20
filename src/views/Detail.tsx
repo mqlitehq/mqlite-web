@@ -19,6 +19,7 @@ import { FilterEditor } from '../components/FilterEditor.js'
 import { PublishPanel, SendPanel } from '../components/Composer.js'
 import { Receiver } from '../components/Receiver.js'
 import { DeleteQueue } from '../components/delete-queue.js'
+import { DeleteSubscription } from '../components/delete-subscription.js'
 import { DLQActions } from '../components/DLQActions.js'
 import { DeferredSettle } from '../components/DeferredSettle.js'
 import { MessageDetail } from '../components/MessageDetail.js'
@@ -43,11 +44,15 @@ export function Detail({
   const { name, kind, topic } = target
   const isSub = kind === 'subscription'
 
-  const { queues, metrics, reload: loadStats, err: observationError } = useTopology()
+  const { queues, subscriptions, metrics, reload: loadStats, err: observationError } = useTopology()
   const m = metrics[name]
   const queueState = isSub ? undefined : queues.find((queue) => queue.name === name)?.state
-  const [deletionAccepted, setDeletionAccepted] = useState(queueState === 'deleting')
-  const deleting = queueState === 'deleting' || deletionAccepted
+  const subscriptionState = isSub
+    ? subscriptions.find((subscription) => subscription.topic === topic && subscription.name === name)?.state
+    : undefined
+  const lifecycleState = isSub ? subscriptionState : queueState
+  const [deletionAccepted, setDeletionAccepted] = useState(lifecycleState === 'deleting')
+  const deleting = lifecycleState === 'deleting' || deletionAccepted
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
   const [msgs, setMsgs] = useState<WireMessage[] | null>(null)
@@ -62,9 +67,9 @@ export function Detail({
   const loadExpr = useCallback(() => {
     if (!isSub) return
     listSubscriptions()
-      .then((subs) => setExpr(subs.find((s) => s.name === name)?.expr ?? ''))
+      .then((subs) => setExpr(subs.find((s) => s.topic === topic && s.name === name)?.expr ?? ''))
       .catch(() => setExpr(''))
-  }, [isSub, name])
+  }, [isSub, name, topic])
 
   const loadMsgs = useCallback(async () => {
     if (deleting) {
@@ -85,8 +90,8 @@ export function Detail({
     loadExpr()
   }, [loadExpr])
   useEffect(() => {
-    if (queueState === 'deleting') setDeletionAccepted(true)
-  }, [queueState])
+    if (lifecycleState === 'deleting') setDeletionAccepted(true)
+  }, [lifecycleState])
   useEffect(() => {
     loadMsgs()
   }, [loadMsgs])
@@ -192,6 +197,23 @@ export function Detail({
                   }}
                 />
               )}
+              {isSub && topic && (
+                <DeleteSubscription
+                  topic={topic}
+                  name={name}
+                  total={m?.total}
+                  state={deleting ? 'deleting' : subscriptionState}
+                  onRefresh={loadStats}
+                  onDeleting={() => {
+                    setDeletionAccepted(true)
+                    loadStats()
+                  }}
+                  onDeleted={() => {
+                    loadStats()
+                    onBack()
+                  }}
+                />
+              )}
               <Button variant="outline" size="sm" onClick={refresh}>
                 refresh
               </Button>
@@ -207,8 +229,9 @@ export function Detail({
 
       {deleting && (
         <Card className="mt-4 border border-warn/30 bg-warn/5 p-4 text-sm text-warn">
-          Deletion has been accepted. Queue work is blocked while bounded cleanup runs in the background. The
-          queue name cannot be reused until this row disappears.
+          Deletion has been accepted. {isSub ? 'Subscription fan-out and work are' : 'Queue work is'} blocked while
+          bounded cleanup runs in the background. The {isSub ? 'subscription' : 'queue'} name cannot be reused until
+          this row disappears.
         </Card>
       )}
 
@@ -235,7 +258,7 @@ export function Detail({
         <Card className="mt-4 p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium uppercase tracking-wide text-faint">filter</span>
-            {!editFilter && (
+            {!deleting && !editFilter && (
               <Button variant="ghost" size="sm" onClick={() => setEditFilter(true)}>
                 edit filter
               </Button>
