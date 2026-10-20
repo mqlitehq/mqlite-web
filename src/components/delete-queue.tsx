@@ -1,16 +1,20 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApiError, deleteQueue, observeUnsupported } from '../lib/api.js'
 import { Button, ErrorBanner, Input } from './ui.js'
 
 export function DeleteQueue({
   name,
   total,
+  state,
   onDeleted,
+  onDeleting,
   onRefresh,
 }: {
   name: string
   total?: number
+  state?: 'active' | 'deleting'
   onDeleted: () => void
+  onDeleting: () => void
   onRefresh: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -18,15 +22,38 @@ export function DeleteQueue({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [uncertain, setUncertain] = useState(false)
+  const [force, setForce] = useState(false)
+  const [pending, setPending] = useState(state === 'deleting')
+  const [status, setStatus] = useState('')
+
+  useEffect(() => {
+    if (state === 'deleting') setPending(true)
+  }, [state])
 
   async function remove() {
-    if (busy || uncertain || confirmation !== name || total !== 0) return
+    if (
+      busy ||
+      uncertain ||
+      confirmation !== name ||
+      (!pending && (total === undefined || (total > 0 && !force)))
+    )
+      return
     setBusy(true)
     setError('')
+    setStatus('')
     try {
-      await deleteQueue(name)
-      dialog.current?.close()
-      onDeleted()
+      const result = await deleteQueue(name, !pending && force)
+      if (result.deleted) {
+        dialog.current?.close()
+        onDeleted()
+      } else {
+        setPending(true)
+        setForce(false)
+        setStatus(
+          'Deletion was accepted. New work is blocked and the name stays reserved while bounded cleanup continues. Check again to confirm completion.',
+        )
+        onDeleting()
+      }
     } catch (e) {
       if (e instanceof ApiError && observeUnsupported(e)) {
         setError('This broker does not support deleting queues. Upgrade the broker to use this action.')
@@ -56,10 +83,13 @@ export function DeleteQueue({
           setConfirmation('')
           setError('')
           setUncertain(false)
+          setForce(false)
+          setPending(state === 'deleting')
+          setStatus('')
           dialog.current?.showModal()
         }}
       >
-        delete queue
+        {state === 'deleting' ? 'deletion pending' : 'delete queue'}
       </Button>
       <dialog
         ref={dialog}
@@ -74,16 +104,29 @@ export function DeleteQueue({
           Delete {name}?
         </h2>
         <p id="delete-queue-description" className="text-xs leading-relaxed text-muted-foreground">
-          Stop producers and consumers before deleting. Only empty queues can be deleted. Active, locked,
-          scheduled, deferred and dead-letter messages must all be cleared first. Deletion removes the queue
-          configuration and its deduplication and replay history.
+          {pending
+            ? 'This queue is already deleting. Its data plane is unavailable and its name stays reserved until cleanup finishes.'
+            : 'Stop producers and consumers before deleting. The default action succeeds only when every message state is empty. Deletion also removes queue configuration, deduplication and replay history.'}
         </p>
-        {total === undefined ? (
+        {!pending && total === undefined ? (
           <p className="text-xs text-warn">Message count is unknown. Refresh before deleting.</p>
-        ) : total > 0 ? (
-          <p className="text-xs text-warn">
-            This queue still contains {total} message(s) and cannot be deleted.
-          </p>
+        ) : !pending && total !== undefined && total > 0 ? (
+          <div className="space-y-2 rounded-lg bg-danger/10 p-3 text-xs text-danger">
+            <p>This queue contains {total} message(s). Empty-only deletion is unavailable.</p>
+            <label className="flex items-start gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={force}
+                disabled={busy || uncertain}
+                onChange={(event) => setForce(event.target.checked)}
+              />
+              <span>Force deletion and permanently discard every message state</span>
+            </label>
+            <p className="leading-relaxed">
+              This discards active, locked, scheduled, deferred and dead-letter messages. A locked delivery may
+              already have caused an external side effect; deleting the queue cannot undo it.
+            </p>
+          </div>
         ) : null}
         <div>
           <label htmlFor="delete-queue-name" className="mb-1 block text-xs text-muted-foreground">
@@ -97,6 +140,11 @@ export function DeleteQueue({
             onChange={(event) => setConfirmation(event.target.value)}
           />
         </div>
+        {status && (
+          <p role="status" className="rounded-lg bg-warn/10 px-3 py-2 text-xs leading-relaxed text-warn">
+            {status}
+          </p>
+        )}
         {error && <ErrorBanner message={error} />}
         <div className="flex gap-2">
           <Button variant="outline" autoFocus disabled={busy} onClick={() => dialog.current?.close()}>
@@ -104,10 +152,15 @@ export function DeleteQueue({
           </Button>
           <Button
             variant="danger"
-            disabled={busy || uncertain || total !== 0 || confirmation !== name}
+            disabled={
+              busy ||
+              uncertain ||
+              confirmation !== name ||
+              (!pending && (total === undefined || (total > 0 && !force)))
+            }
             onClick={() => void remove()}
           >
-            {busy ? 'deleting…' : 'confirm delete'}
+            {busy ? 'deleting…' : pending ? 'check deletion' : 'confirm delete'}
           </Button>
         </div>
       </dialog>

@@ -95,6 +95,22 @@ Rotate by creating a replacement, switching clients, and revoking the old key.
 Backups contain key state; restoring an older backup can re-enable credentials
 revoked afterward, so audit and rotate keys before reopening access.
 
+## Queue deletion
+
+The queue detail page requires the exact queue name before deletion. The default
+action remains empty-only: every retained message state must be empty. When the
+latest count is nonzero, the console exposes a separate force checkbox and states
+that force permanently discards active, locked, scheduled, deferred and
+dead-letter messages. A locked delivery may already have caused an external side
+effect; removing its broker record cannot undo that effect.
+
+Current brokers may accept deletion before bounded physical cleanup finishes. The
+console recognizes the `{"deleted":false,"state":"deleting"}` response, refreshes
+the inventory, marks the queue as **deleting**, and stops offering data-plane
+actions. The name remains reserved until the row disappears. Checking the same
+deletion again does not repeat force authorization; the broker already persisted
+that choice. Older brokers report the operation as unsupported.
+
 ## Integrating with the broker
 
 The broker embeds the built console at `/ui/`. This repository remains the source

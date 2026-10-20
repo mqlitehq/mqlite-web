@@ -232,6 +232,8 @@ interface BrokerFixture {
   calls: string[]
   legacy: boolean
   failedQueue: string
+  queuePresent: boolean
+  queueState: 'active' | 'deleting'
 }
 async function setup(
   page: Page,
@@ -244,6 +246,8 @@ async function setup(
     calls: [],
     legacy: false,
     failedQueue: '',
+    queuePresent: true,
+    queueState: 'active',
   }
   await page.addInitScript((loggedIn) => {
     localStorage.setItem('mqlite_endpoint', 'https://observe.example.test')
@@ -263,8 +267,10 @@ async function setup(
     if (path.endsWith('/ListQueues'))
       return respond({
         queues: [
-          { name: 'orders', kind: 'queue' },
-          { name: 'emails', kind: 'subscription' },
+          ...(broker.queuePresent
+            ? [{ name: 'orders', kind: 'queue', state: broker.queueState }]
+            : []),
+          { name: 'emails', kind: 'subscription', state: 'active' },
         ],
       })
     if (path.endsWith('/ListSubscriptions'))
@@ -795,7 +801,7 @@ test('diagnostics remain optional for old brokers but validate all present field
   }
 })
 
-// Queue lifecycle actions must preserve messages even if the last snapshot was empty.
+// Queue lifecycle actions require exact confirmation and never infer force from a snapshot.
 test('empty queue deletion requires its exact name and returns to refreshed inventory', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const broker = await setup(page)
@@ -815,8 +821,13 @@ test('empty queue deletion requires its exact name and returns to refreshed inve
   await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
     expect(route.request().postDataJSON()).toEqual({ name: 'orders' })
     deleted++
+    broker.queuePresent = false
     snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"deleted":true}' })
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"deleted":true,"state":"deleted"}',
+    })
   })
   await page.goto('/')
   await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
@@ -901,8 +912,19 @@ for (const reply of [
   })
 }
 
-test('nonempty queue deletion is disabled before submission', async ({ page }) => {
+test('nonempty queue deletion requires explicit force and warns about locked external effects', async ({ page }) => {
   const broker = await setup(page)
+  let deleted = 0
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ name: 'orders', force: true })
+    deleted++
+    broker.queuePresent = false
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"deleted":true,"state":"deleted"}',
+    })
+  })
   await page.goto('/')
   await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
   await page.getByRole('row').filter({ hasText: 'orders' }).click()
@@ -910,6 +932,89 @@ test('nonempty queue deletion is disabled before submission', async ({ page }) =
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('Type the queue name to confirm').fill('orders')
   await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
-  await expect(dialog).toContainText('still contains')
-  expect(broker.calls.some((path) => path.endsWith('/DeleteQueue'))).toBe(false)
+  await expect(dialog).toContainText('Empty-only deletion is unavailable')
+  await expect(dialog).toContainText('locked')
+  await expect(dialog).toContainText('external side effect')
+  await dialog.getByRole('checkbox', { name: 'Force deletion and permanently discard every message state' }).check()
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(deleted).toBe(1)
+})
+
+test('accepted deletion exposes deleting state and checks completion without repeating force', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = broker.observation as Observation
+  const requests: unknown[] = []
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
+    requests.push(route.request().postDataJSON())
+    if (requests.length === 1) {
+      broker.queueState = 'deleting'
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"deleted":false,"state":"deleting"}',
+      })
+      return
+    }
+    broker.queuePresent = false
+    snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"deleted":true,"state":"deleted"}',
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await dialog.getByRole('checkbox', { name: 'Force deletion and permanently discard every message state' }).check()
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect(dialog.getByRole('status')).toContainText('Deletion was accepted')
+  await expect(page.getByText('cleanup in progress · name reserved')).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ send', exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'check deletion', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('row').filter({ hasText: 'orders' })).toHaveCount(0)
+  expect(requests).toEqual([{ name: 'orders', force: true }, { name: 'orders' }])
+})
+
+test('pending deletion treats a later not-found as completed cleanup', async ({ page }) => {
+  const broker = await setup(page)
+  const snapshot = broker.observation as Observation
+  const requests: unknown[] = []
+  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
+    requests.push(route.request().postDataJSON())
+    if (requests.length === 1) {
+      broker.queueState = 'deleting'
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"deleted":false,"state":"deleting"}',
+      })
+      return
+    }
+    broker.queuePresent = false
+    snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: '{"code":"not_found","message":"queue not found"}',
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'orders' }).click()
+  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
+  await dialog.getByRole('checkbox', { name: 'Force deletion and permanently discard every message state' }).check()
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect(dialog.getByRole('status')).toContainText('Deletion was accepted')
+  await dialog.getByRole('button', { name: 'check deletion', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('row').filter({ hasText: 'orders' })).toHaveCount(0)
+  expect(requests).toEqual([{ name: 'orders', force: true }, { name: 'orders' }])
 })

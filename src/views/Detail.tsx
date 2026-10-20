@@ -43,8 +43,11 @@ export function Detail({
   const { name, kind, topic } = target
   const isSub = kind === 'subscription'
 
-  const { metrics, reload: loadStats, err: observationError } = useTopology()
+  const { queues, metrics, reload: loadStats, err: observationError } = useTopology()
   const m = metrics[name]
+  const queueState = isSub ? undefined : queues.find((queue) => queue.name === name)?.state
+  const [deletionAccepted, setDeletionAccepted] = useState(queueState === 'deleting')
+  const deleting = queueState === 'deleting' || deletionAccepted
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
   const [msgs, setMsgs] = useState<WireMessage[] | null>(null)
@@ -64,6 +67,11 @@ export function Detail({
   }, [isSub, name])
 
   const loadMsgs = useCallback(async () => {
+    if (deleting) {
+      setMsgs([])
+      setErr('')
+      return
+    }
     setMsgs(null)
     try {
       setMsgs(await peek(name, tab, 100))
@@ -71,11 +79,14 @@ export function Detail({
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'peek failed')
     }
-  }, [name, tab])
+  }, [deleting, name, tab])
 
   useEffect(() => {
     loadExpr()
   }, [loadExpr])
+  useEffect(() => {
+    if (queueState === 'deleting') setDeletionAccepted(true)
+  }, [queueState])
   useEffect(() => {
     loadMsgs()
   }, [loadMsgs])
@@ -143,10 +154,13 @@ export function Detail({
               {isSub && topic && <span className="text-faint">/</span>}
               {name}
               {isSub && <Badge tone="info">subscription</Badge>}
+              {deleting && <Badge tone="warn">deleting</Badge>}
             </span>
           }
           subtitle={
-            m ? (
+            deleting ? (
+              'cleanup in progress · name reserved'
+            ) : m ? (
               <span>
                 {m.total} total
                 {m.oldest_message_age_ms > 0 && (
@@ -166,7 +180,12 @@ export function Detail({
                 <DeleteQueue
                   name={name}
                   total={m?.total}
+                  state={deleting ? 'deleting' : queueState}
                   onRefresh={loadStats}
+                  onDeleting={() => {
+                    setDeletionAccepted(true)
+                    loadStats()
+                  }}
                   onDeleted={() => {
                     loadStats()
                     onBack()
@@ -176,29 +195,40 @@ export function Detail({
               <Button variant="outline" size="sm" onClick={refresh}>
                 refresh
               </Button>
-              <Button size="sm" onClick={() => setPanel((v) => !v)}>
-                {isSub ? '+ publish' : '+ send'}
-              </Button>
+              {!deleting && (
+                <Button size="sm" onClick={() => setPanel((v) => !v)}>
+                  {isSub ? '+ publish' : '+ send'}
+                </Button>
+              )}
             </>
           }
         />
       </div>
 
-      <div className="mt-4">
-        <StatStrip label="messages">
-          <Stat label="active" v={m?.active} state="active" />
-          <Stat label="locked" v={m?.locked} state="locked" tone={m?.locked ? 'warn' : undefined} />
-          <Stat label="scheduled" v={m?.scheduled} state="scheduled" />
-          <Stat label="deferred" v={m?.deferred} state="deferred" />
-          <Stat
-            label="dead-letter"
-            v={m?.dead_lettered}
-            state="dead_lettered"
-            tone={m?.dead_lettered ? 'danger' : undefined}
-          />
-          <Stat label="total" v={m?.total} />
-        </StatStrip>
-      </div>
+      {deleting && (
+        <Card className="mt-4 border border-warn/30 bg-warn/5 p-4 text-sm text-warn">
+          Deletion has been accepted. Queue work is blocked while bounded cleanup runs in the background. The
+          queue name cannot be reused until this row disappears.
+        </Card>
+      )}
+
+      {!deleting && (
+        <div className="mt-4">
+          <StatStrip label="messages">
+            <Stat label="active" v={m?.active} state="active" />
+            <Stat label="locked" v={m?.locked} state="locked" tone={m?.locked ? 'warn' : undefined} />
+            <Stat label="scheduled" v={m?.scheduled} state="scheduled" />
+            <Stat label="deferred" v={m?.deferred} state="deferred" />
+            <Stat
+              label="dead-letter"
+              v={m?.dead_lettered}
+              state="dead_lettered"
+              tone={m?.dead_lettered ? 'danger' : undefined}
+            />
+            <Stat label="total" v={m?.total} />
+          </StatStrip>
+        </div>
+      )}
 
       {/* subscription filter — the online editor lives here. */}
       {isSub && (
@@ -245,7 +275,7 @@ export function Detail({
         </Card>
       )}
 
-      {panel &&
+      {!deleting && panel &&
         (isSub && topic ? (
           <Card className="mt-4 p-4">
             <div className="mb-3 text-sm font-medium">publish to {topic}</div>
@@ -255,40 +285,42 @@ export function Detail({
           <SendPanel queue={name} onClose={() => setPanel(false)} onSent={refresh} />
         ))}
 
-      {showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refresh} />}
+      {!deleting && showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refresh} />}
 
-      <div className="mt-5 flex flex-wrap items-center gap-1 border-b border-border">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
-              tab === t.key
-                ? 'border-accent text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {t.label}
-            {counts[t.key] !== undefined && counts[t.key]! > 0 && (
-              <span className="ml-1.5 text-xs text-faint">{counts[t.key]}</span>
-            )}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-2 pr-1">
-          {tab === 'active' && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || !m?.active}
-              onClick={() => setShowRecv((v) => !v)}
+      {!deleting && (
+        <div className="mt-5 flex flex-wrap items-center gap-1 border-b border-border">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+                tab === t.key
+                  ? 'border-accent text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
-              receive
-            </Button>
-          )}
+              {t.label}
+              {counts[t.key] !== undefined && counts[t.key]! > 0 && (
+                <span className="ml-1.5 text-xs text-faint">{counts[t.key]}</span>
+              )}
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-2 pr-1">
+            {tab === 'active' && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || !m?.active}
+                onClick={() => setShowRecv((v) => !v)}
+              >
+                receive
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {tab === 'dead_lettered' && <DLQActions queue={name} busy={busy} run={act} />}
+      {!deleting && tab === 'dead_lettered' && <DLQActions queue={name} busy={busy} run={act} />}
 
       {note && <p className="mt-3 text-xs text-ok">✓ {note}</p>}
       {err && (
@@ -297,12 +329,13 @@ export function Detail({
         </div>
       )}
 
-      {!msgs ? (
-        <Spinner label="peeking" />
-      ) : msgs.length === 0 ? (
-        <Empty>no {tab.replace('_', '-')} messages</Empty>
-      ) : (
-        <Card className="mt-3 overflow-x-auto">
+      {!deleting &&
+        (!msgs ? (
+          <Spinner label="peeking" />
+        ) : msgs.length === 0 ? (
+          <Empty>no {tab.replace('_', '-')} messages</Empty>
+        ) : (
+          <Card className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -408,8 +441,8 @@ export function Detail({
               })}
             </tbody>
           </table>
-        </Card>
-      )}
+          </Card>
+        ))}
     </div>
   )
 }

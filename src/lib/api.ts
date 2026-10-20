@@ -10,6 +10,7 @@ import type {
   BrokerStatus,
   CreateKeyRequest,
   CreateKeyResult,
+  DeleteResult,
   KeyPage,
   Discovery,
   FilterTest,
@@ -169,7 +170,13 @@ export async function listQueues(): Promise<QueueInfo[]> {
     !('queues' in r) ||
     (r.queues !== null &&
       (!Array.isArray(r.queues) ||
-        r.queues.some((q) => !record(q) || typeof q.name !== 'string' || typeof q.kind !== 'string')))
+        r.queues.some(
+          (q) =>
+            !record(q) ||
+            typeof q.name !== 'string' ||
+            typeof q.kind !== 'string' ||
+            ('state' in q && q.state !== 'active' && q.state !== 'deleting'),
+        )))
   )
     throw new ApiError(502, 'invalid_response', 'Queue inventory is unavailable.')
   return r.queues ?? []
@@ -184,15 +191,22 @@ export function subscribe(topic: string, name: string, expr?: string): Promise<u
     ...(expr ? { filter: { expr } } : {}),
   })
 }
-// The broker enforces emptiness transactionally, including in-flight and delayed messages.
-export async function deleteQueue(name: string): Promise<void> {
-  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', { name })
-  if (!record(result) || result.deleted !== true)
-    throw new ApiError(
-      502,
-      'outcome_unknown',
-      'Deletion acknowledgement missing. Refresh the queue list before retrying.',
-    )
+// The broker checks every message state transactionally before accepting an
+// empty-only delete. Force is always explicit and never inferred from counters.
+export async function deleteQueue(name: string, force = false): Promise<DeleteResult> {
+  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', {
+    name,
+    ...(force ? { force: true } : {}),
+  })
+  if (record(result) && result.deleted === true && result.state === 'deleted')
+    return { deleted: true, state: 'deleted' }
+  if (record(result) && result.deleted === false && result.state === 'deleting')
+    return { deleted: false, state: 'deleting' }
+  throw new ApiError(
+    502,
+    'outcome_unknown',
+    'Deletion acknowledgement missing. Refresh the queue list before retrying.',
+  )
 }
 
 // Desensitized runtime snapshot (backend, redacted location, latency, footprint, …).

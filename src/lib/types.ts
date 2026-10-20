@@ -3,10 +3,17 @@
 export interface QueueInfo {
   name: string
   kind: string // "queue" | "subscription"
+  // Older brokers omit state; current brokers report active or deleting.
+  state?: 'active' | 'deleting'
   lock_duration_ms: number
   max_delivery_count: number
   default_ttl_ms: number
   dedup_window_ms: number
+}
+
+export interface DeleteResult {
+  deleted: boolean
+  state: 'deleted' | 'deleting'
 }
 
 export interface Metrics {

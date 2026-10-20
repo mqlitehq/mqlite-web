@@ -113,6 +113,7 @@ export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-foreground">{q.name}</span>
+                        {q.state === 'deleting' && <Badge tone="warn">deleting</Badge>}
                         {q.kind && q.kind !== 'queue' && (
                           <Badge tone="outline" className="h-4 px-1.5 text-[10px]">
                             {q.kind}
