@@ -46,17 +46,31 @@ export function onUnauthorized(fn: Listener): () => void {
   return () => unauthListeners.delete(fn)
 }
 
-async function rpc<T>(path: string, body?: unknown, token?: string, signal?: AbortSignal): Promise<T> {
+async function rpc<T>(
+  path: string,
+  body?: unknown,
+  token?: string,
+  signal?: AbortSignal,
+  redirect: RequestRedirect = 'follow',
+): Promise<T> {
   const tok = token ?? getToken()
   const res = await fetch(base() + path, {
     method: 'POST',
     signal,
+    redirect,
     headers: {
       'Content-Type': 'application/json',
       ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
     },
     body: JSON.stringify(body ?? {}),
   })
+  if (redirect === 'manual' && (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400))) {
+    throw new ApiError(
+      502,
+      'outcome_unknown',
+      'Deletion response was redirected. Refresh the queue list to reconcile.',
+    )
+  }
   if (res.status === 401) {
     clearToken()
     unauthListeners.forEach((fn) => fn())
@@ -194,10 +208,18 @@ export function subscribe(topic: string, name: string, expr?: string): Promise<u
 // The broker checks every message state transactionally before accepting an
 // empty-only delete. Force is always explicit and never inferred from counters.
 export async function deleteQueue(name: string, force = false): Promise<DeleteResult> {
-  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', {
-    name,
-    ...(force ? { force: true } : {}),
-  })
+  // fetch follows 307/308 POST redirects by default. A name-addressed destructive
+  // request must be sent at most once; redirect outcomes are reconciled by listing.
+  const result = await rpc<unknown>(
+    '/mqlite.v1.AdminService/DeleteQueue',
+    {
+      name,
+      ...(force ? { force: true } : {}),
+    },
+    undefined,
+    undefined,
+    'manual',
+  )
   if (record(result) && result.deleted === true && result.state === 'deleted')
     return { deleted: true, state: 'deleted' }
   if (record(result) && result.deleted === false && result.state === 'deleting')
@@ -205,7 +227,7 @@ export async function deleteQueue(name: string, force = false): Promise<DeleteRe
   throw new ApiError(
     502,
     'outcome_unknown',
-    'Deletion acknowledgement missing. Refresh the queue list before retrying.',
+    'Deletion acknowledgement missing. Refresh the queue list to reconcile.',
   )
 }
 

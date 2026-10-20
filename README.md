@@ -109,8 +109,10 @@ console recognizes the `{"deleted":false,"state":"deleting"}` response, refreshe
 the inventory, marks the queue as **deleting**, and stops offering data-plane
 actions. The name remains reserved until the row disappears. **Check deletion**
 only refreshes the queue inventory; it never replays the name-only delete against
-a possible same-name replacement. Older brokers report the operation as
-unsupported.
+a possible same-name replacement. The delete request also refuses HTTP redirects;
+a redirect, transport failure, or invalid acknowledgement leaves the result
+unknown and requires a read-only inventory refresh. Older brokers report the
+operation as unsupported.
 
 ## Integrating with the broker
 
