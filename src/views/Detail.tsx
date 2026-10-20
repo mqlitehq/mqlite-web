@@ -43,7 +43,7 @@ export function Detail({
   const { name, kind, topic } = target
   const isSub = kind === 'subscription'
 
-  const { queues, metrics, reload: loadStats, err: observationError } = useTopology()
+  const { metrics, reload: loadStats, err: observationError } = useTopology()
   const m = metrics[name]
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
@@ -165,7 +165,6 @@ export function Detail({
               {!isSub && (
                 <DeleteQueue
                   name={name}
-                  generation={queues.find((q) => q.name === name)?.generation}
                   total={m?.total}
                   onRefresh={loadStats}
                   onDeleted={() => {

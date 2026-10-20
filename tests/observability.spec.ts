@@ -227,7 +227,6 @@ function sample(access: Observation['access'] = 'manage'): Observation {
   return snapshot
 }
 interface BrokerFixture {
-  generation?: string
   observation: unknown
   status: number
   calls: string[]
@@ -240,7 +239,6 @@ async function setup(
   loggedIn = true,
 ): Promise<BrokerFixture> {
   const broker: BrokerFixture = {
-    generation: 'orders-generation-1',
     observation: sample(access),
     status: 200,
     calls: [],
@@ -265,7 +263,7 @@ async function setup(
     if (path.endsWith('/ListQueues'))
       return respond({
         queues: [
-          { name: 'orders', kind: 'queue', generation: broker.generation },
+          { name: 'orders', kind: 'queue' },
           { name: 'emails', kind: 'subscription' },
         ],
       })
@@ -815,7 +813,7 @@ test('empty queue deletion requires its exact name and returns to refreshed inve
   broker.observation = snapshot
   let deleted = 0
   await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
-    expect(route.request().postDataJSON()).toEqual({ name: 'orders', generation: 'orders-generation-1' })
+    expect(route.request().postDataJSON()).toEqual({ name: 'orders' })
     deleted++
     snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"deleted":true}' })
@@ -846,7 +844,6 @@ for (const reply of [
   'unsupported',
   'outcome_unknown',
   'malformed_success',
-  'queue_changed',
 ]) {
   test(`queue deletion reports ${reply} without dismissing the action`, async ({ page }) => {
     const broker = await setup(page)
@@ -867,7 +864,7 @@ for (const reply of [
         status:
           reply === 'malformed_success'
             ? 200
-            : reply === 'queue_not_empty' || reply === 'queue_changed'
+            : reply === 'queue_not_empty'
               ? 409
               : reply === 'unsupported'
                 ? 404
@@ -894,14 +891,12 @@ for (const reply of [
     await expect(dialog.getByRole('alert')).toContainText(
       reply === 'queue_not_empty'
         ? 'Queue now contains messages'
-        : reply === 'queue_changed'
-          ? 'This queue was replaced'
-          : reply === 'unsupported'
-            ? 'does not support'
-            : 'could not be confirmed',
+        : reply === 'unsupported'
+          ? 'does not support'
+          : 'could not be confirmed',
     )
     await expect(dialog).toBeVisible()
-    if (reply === 'outcome_unknown' || reply === 'malformed_success' || reply === 'queue_changed')
+    if (reply === 'outcome_unknown' || reply === 'malformed_success')
       await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
   })
 }
@@ -917,56 +912,4 @@ test('nonempty queue deletion is disabled before submission', async ({ page }) =
   await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
   await expect(dialog).toContainText('still contains')
   expect(broker.calls.some((path) => path.endsWith('/DeleteQueue'))).toBe(false)
-})
-
-test('open deletion dialog stays bound to its original queue after metadata refresh', async ({ page }) => {
-  const broker = await setup(page)
-  const snapshot = sample()
-  Object.assign(snapshot.queues![0], {
-    active: 0,
-    locked: 0,
-    scheduled: 0,
-    deferred: 0,
-    dead_lettered: 0,
-    unexpected: 0,
-    total: 0,
-    oldest_message_age_ms: 0,
-  })
-  broker.observation = snapshot
-  await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
-    expect(route.request().postDataJSON()).toEqual({ name: 'orders', generation: 'orders-generation-1' })
-    await route.fulfill({
-      status: 409,
-      contentType: 'application/json',
-      body: JSON.stringify({ code: 'queue_changed', message: 'replaced' }),
-    })
-  })
-  await page.goto('/')
-  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
-  await page.getByRole('row').filter({ hasText: 'orders' }).click()
-  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
-  broker.generation = 'orders-generation-2'
-  const reads = broker.calls.filter((p) => p.endsWith('/ListQueues')).length
-  // Simulate a background refresh while the native modal keeps the page inert.
-  await page
-    .getByRole('button', { name: 'refresh', exact: true })
-    .evaluate((button: HTMLButtonElement) => button.click())
-  await expect.poll(() => broker.calls.filter((p) => p.endsWith('/ListQueues')).length).toBeGreaterThan(reads)
-  const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
-  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('This queue was replaced')
-})
-
-test('older broker without queue identities cannot submit a deletion', async ({ page }) => {
-  const broker = await setup(page)
-  broker.generation = undefined
-  await page.goto('/')
-  await page.locator('nav').getByRole('button', { name: 'queues', exact: true }).click()
-  await page.getByRole('row').filter({ hasText: 'orders' }).click()
-  await page.getByRole('button', { name: 'delete queue', exact: true }).click()
-  const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Type the queue name to confirm').fill('orders')
-  await expect(dialog).toContainText('Queue identity is unavailable')
-  await expect(dialog.getByRole('button', { name: 'confirm delete', exact: true })).toBeDisabled()
 })

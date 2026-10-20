@@ -5,37 +5,31 @@ import { Button, ErrorBanner, Input } from './ui.js'
 export function DeleteQueue({
   name,
   total,
-  generation,
   onDeleted,
   onRefresh,
 }: {
   name: string
   total?: number
-  generation?: string
   onDeleted: () => void
   onRefresh: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [confirmation, setConfirmation] = useState('')
-  const [expectedGeneration, setExpectedGeneration] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [uncertain, setUncertain] = useState(false)
 
   async function remove() {
-    if (busy || uncertain || !expectedGeneration || confirmation !== name || total !== 0) return
+    if (busy || uncertain || confirmation !== name || total !== 0) return
     setBusy(true)
     setError('')
     try {
-      await deleteQueue(name, expectedGeneration)
+      await deleteQueue(name)
       dialog.current?.close()
       onDeleted()
     } catch (e) {
       if (e instanceof ApiError && observeUnsupported(e)) {
         setError('This broker does not support deleting queues. Upgrade the broker to use this action.')
-      } else if (e instanceof ApiError && e.code === 'queue_changed') {
-        setUncertain(true)
-        setError('This queue was replaced. Close this dialog and refresh before choosing the new queue.')
       } else if (e instanceof ApiError && e.code === 'not_found') {
         dialog.current?.close()
         onDeleted()
@@ -59,7 +53,6 @@ export function DeleteQueue({
         variant="danger"
         size="sm"
         onClick={() => {
-          setExpectedGeneration(generation ?? '')
           setConfirmation('')
           setError('')
           setUncertain(false)
@@ -85,11 +78,6 @@ export function DeleteQueue({
           scheduled, deferred and dead-letter messages must all be cleared first. Deletion removes the queue
           configuration and its deduplication and replay history.
         </p>
-        {!expectedGeneration && (
-          <p className="text-xs text-warn">
-            Queue identity is unavailable. Refresh or upgrade the broker before deleting.
-          </p>
-        )}
         {total === undefined ? (
           <p className="text-xs text-warn">Message count is unknown. Refresh before deleting.</p>
         ) : total > 0 ? (
@@ -116,7 +104,7 @@ export function DeleteQueue({
           </Button>
           <Button
             variant="danger"
-            disabled={busy || uncertain || !expectedGeneration || total !== 0 || confirmation !== name}
+            disabled={busy || uncertain || total !== 0 || confirmation !== name}
             onClick={() => void remove()}
           >
             {busy ? 'deleting…' : 'confirm delete'}

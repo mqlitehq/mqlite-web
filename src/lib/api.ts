@@ -185,8 +185,8 @@ export function subscribe(topic: string, name: string, expr?: string): Promise<u
   })
 }
 // The broker enforces emptiness transactionally, including in-flight and delayed messages.
-export async function deleteQueue(name: string, generation: string): Promise<void> {
-  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', { name, generation })
+export async function deleteQueue(name: string): Promise<void> {
+  const result = await rpc<unknown>('/mqlite.v1.AdminService/DeleteQueue', { name })
   if (!record(result) || result.deleted !== true)
     throw new ApiError(
       502,
