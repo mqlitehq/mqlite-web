@@ -361,7 +361,9 @@ export async function listSubscriptionsPage(
   }
   if (
     (r.next_after !== undefined && subscriptions.length !== limit) ||
-    (!options.after && subscriptions.length !== Math.min(r.total as number, limit))
+    (!options.after &&
+      (subscriptions.length !== Math.min(r.total as number, limit) ||
+        ((r.total as number) > subscriptions.length && r.next_after === undefined)))
   )
     throw new ApiError(502, 'invalid_response', 'Paged subscription inventory is unavailable.')
   return {

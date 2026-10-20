@@ -168,7 +168,7 @@ export function DeleteSubscription({
             ? 'This subscription is already deleting. Fan-out and its data plane are unavailable until cleanup finishes.'
             : mode === 'reconcile'
               ? 'The previous result cannot be acted on safely. This check reads the exact topic scope, including deleting subscriptions, and never repeats the delete.'
-              : 'Stop publishers and consumers before deleting. The default action succeeds only when every retained message state is empty. The topic disappears automatically after its final subscription is removed.'}
+              : 'Stop publishers and consumers before deleting. The default action succeeds only when every retained message state is empty. Fan-out becomes unavailable as soon as the final active subscription retires. The topic address remains reserved until the deleting mapping is physically cleaned up.'}
         </p>
         {!reconciling && total === undefined ? (
           <p className="text-xs text-warn">Message count is unknown. Refresh before deleting.</p>

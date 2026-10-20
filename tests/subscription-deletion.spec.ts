@@ -350,6 +350,47 @@ test('reconciliation rejects a repeated cursor and never replays delete', async 
   ])
 })
 
+test('reconciliation rejects a first page missing its required cursor and never replays delete', async ({
+  page,
+}) => {
+  const broker = await setup(page)
+  let deletes = 0
+  const pageRequests: Record<string, unknown>[] = []
+  await page.route('**/mqlite.v1.AdminService/DeleteSubscription', async (route) => {
+    deletes++
+    broker.active = false
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"deleted":false,"state":"deleting"}',
+    })
+  })
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    pageRequests.push(route.request().postDataJSON() as Record<string, unknown>)
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: fullSubscriptionPage(),
+        total: 1001,
+      }),
+    })
+  })
+
+  const dialog = await openDelete(page)
+  await confirmExact(dialog)
+  await dialog
+    .getByRole('checkbox', { name: 'Force deletion and permanently discard every message state' })
+    .check()
+  await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
+  await expect(dialog.getByRole('status')).toContainText('Deletion was accepted')
+  await dialog.getByRole('button', { name: 'check outcome', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Paged subscription inventory is unavailable')
+  await expect(dialog).toBeVisible()
+  expect(deletes).toBe(1)
+  expect(pageRequests).toEqual([{ topic: 'events', limit: 1000, include_deleting: true }])
+})
+
 test('older brokers keep the subscription visible and explain that deletion is unsupported', async ({ page }) => {
   const broker = await setup(page)
   broker.total = 0
