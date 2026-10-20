@@ -107,9 +107,10 @@ effect; removing its broker record cannot undo that effect.
 Current brokers may accept deletion before bounded physical cleanup finishes. The
 console recognizes the `{"deleted":false,"state":"deleting"}` response, refreshes
 the inventory, marks the queue as **deleting**, and stops offering data-plane
-actions. The name remains reserved until the row disappears. Checking the same
-deletion again does not repeat force authorization; the broker already persisted
-that choice. Older brokers report the operation as unsupported.
+actions. The name remains reserved until the row disappears. **Check deletion**
+only refreshes the queue inventory; it never replays the name-only delete against
+a possible same-name replacement. Older brokers report the operation as
+unsupported.
 
 ## Integrating with the broker
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ApiError, deleteQueue, observeUnsupported } from '../lib/api.js'
+import { ApiError, deleteQueue, listQueues, observeUnsupported } from '../lib/api.js'
 import { Button, ErrorBanner, Input } from './ui.js'
 
 export function DeleteQueue({
@@ -42,7 +42,20 @@ export function DeleteQueue({
     setError('')
     setStatus('')
     try {
-      const result = await deleteQueue(name, !pending && force)
+      if (pending) {
+        // Reconcile with a read. Replaying a name-only DELETE after the old
+        // lifetime disappears could delete a same-name replacement.
+        const current = (await listQueues()).find((queue) => queue.name === name)
+        if (!current || current.state !== 'deleting') {
+          dialog.current?.close()
+          onDeleted()
+        } else {
+          setStatus('Cleanup is still in progress. The queue name remains reserved.')
+          onRefresh()
+        }
+        return
+      }
+      const result = await deleteQueue(name, force)
       if (result.deleted) {
         dialog.current?.close()
         onDeleted()
@@ -57,7 +70,7 @@ export function DeleteQueue({
     } catch (e) {
       if (e instanceof ApiError && observeUnsupported(e)) {
         setError('This broker does not support deleting queues. Upgrade the broker to use this action.')
-      } else if (e instanceof ApiError && e.code === 'not_found') {
+      } else if (!pending && e instanceof ApiError && e.code === 'not_found') {
         dialog.current?.close()
         onDeleted()
       } else if (!(e instanceof ApiError) || e.status >= 500 || e.code === 'outcome_unknown') {
