@@ -114,6 +114,23 @@ a redirect, transport failure, or invalid acknowledgement leaves the result
 unknown and requires a read-only inventory refresh. Older brokers report the
 operation as unsupported.
 
+## Subscription deletion
+
+The subscription detail page deletes one exact `topic/name` mapping and requires
+that full pair as confirmation. Deletion is empty-only by default. The force
+choice appears only when the latest retained-message total is greater than zero,
+and explicitly discards every message state. Removing the final subscription
+also lets its implicit topic disappear; topics have no separate delete action.
+
+An accepted but unfinished delete blocks fan-out and the subscription data plane
+while cleanup retains the name. Pending or unknown outcomes are checked only
+through bounded `ListSubscriptionsPage` reads scoped to the topic with
+`include_deleting=true`. The console follows opaque cursors until it finds the
+exact subscription or exhausts the scope. It never reconciles by replaying the
+delete, and it refuses HTTP redirects for that destructive POST. Older brokers
+continue to list subscriptions normally and show an upgrade message when this
+new action is attempted.
+
 ## Integrating with the broker
 
 The broker embeds the built console at `/ui/`. This repository remains the source

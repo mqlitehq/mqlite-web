@@ -14,11 +14,13 @@ import type {
   KeyPage,
   Discovery,
   FilterTest,
+  ListSubscriptionsOptions,
   MessageState,
   Metrics,
   QueueConfig,
   QueueInfo,
   Subscription,
+  SubscriptionPage,
   WireMessage,
 } from './types.js'
 
@@ -231,10 +233,77 @@ export async function deleteQueue(name: string, force = false): Promise<DeleteRe
   )
 }
 
+// Delete one exact topic/name mapping. Like queue deletion this request is sent
+// at most once: fetch must not replay its POST through a 307/308 redirect. Any
+// missing acknowledgement is reconciled with ListSubscriptionsPage, never by
+// issuing another delete against a potentially new same-name subscription.
+export async function deleteSubscription(topic: string, name: string, force = false): Promise<DeleteResult> {
+  let result: unknown
+  try {
+    result = await rpc<unknown>(
+      '/mqlite.v1.AdminService/DeleteSubscription',
+      {
+        topic,
+        name,
+        ...(force ? { force: true } : {}),
+      },
+      undefined,
+      undefined,
+      'manual',
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.code !== 'outcome_unknown') throw error
+    throw new ApiError(
+      502,
+      'outcome_unknown',
+      'Deletion response unavailable. Refresh the paged subscription inventory to reconcile.',
+    )
+  }
+  if (record(result) && result.deleted === true && result.state === 'deleted')
+    return { deleted: true, state: 'deleted' }
+  if (record(result) && result.deleted === false && result.state === 'deleting')
+    return { deleted: false, state: 'deleting' }
+  throw new ApiError(
+    502,
+    'outcome_unknown',
+    'Deletion acknowledgement missing. Refresh the paged subscription inventory to reconcile.',
+  )
+}
+
 // Desensitized runtime snapshot (backend, redacted location, latency, footprint, …).
 export function status(): Promise<BrokerStatus> {
   return rpc<BrokerStatus>('/mqlite.v1.AdminService/Status', {})
 }
+
+interface WireSubscription {
+  topic: string
+  name: string
+  expr?: string
+  state?: 'active' | 'deleting'
+}
+
+function validSubscription(value: unknown, requireState = false): value is WireSubscription {
+  return (
+    record(value) &&
+    typeof value.name === 'string' &&
+    value.name.length > 0 &&
+    typeof value.topic === 'string' &&
+    value.topic.length > 0 &&
+    (!('expr' in value) || typeof value.expr === 'string') &&
+    (!requireState || 'state' in value) &&
+    (!('state' in value) || value.state === 'active' || value.state === 'deleting')
+  )
+}
+
+function normalizeSubscription(value: WireSubscription): Subscription {
+  return {
+    topic: value.topic,
+    name: value.name,
+    expr: value.expr ?? '',
+    state: value.state ?? 'active',
+  }
+}
+
 // Every subscription with its topic + filter expression — what ListQueues omits.
 export async function listSubscriptions(): Promise<Subscription[]> {
   const r = await rpc<{ subscriptions?: Subscription[] }>(
@@ -248,12 +317,58 @@ export async function listSubscriptions(): Promise<Subscription[]> {
     !('subscriptions' in r) ||
     (r.subscriptions !== null &&
       (!Array.isArray(r.subscriptions) ||
-        r.subscriptions.some(
-          (sub) => !record(sub) || typeof sub.name !== 'string' || typeof sub.topic !== 'string',
-        )))
+        r.subscriptions.some((sub) => !validSubscription(sub))))
   )
     throw new ApiError(502, 'invalid_response', 'Subscription inventory is unavailable.')
-  return r.subscriptions ?? []
+  return (r.subscriptions ?? []).map(normalizeSubscription)
+}
+
+// One internally consistent, bounded subscription inventory page. after is an
+// opaque cursor scoped to topic + include_deleting and must be returned unchanged
+// to the broker; separate requests may observe roster changes.
+export async function listSubscriptionsPage(
+  options: ListSubscriptionsOptions = {},
+): Promise<SubscriptionPage> {
+  const r = await rpc<unknown>(
+    '/mqlite.v1.AdminService/ListSubscriptionsPage',
+    options,
+    undefined,
+    AbortSignal.timeout(5000),
+  )
+  const limit = options.limit && options.limit > 0 ? options.limit : 100
+  if (
+    !record(r) ||
+    !Array.isArray(r.subscriptions) ||
+    r.subscriptions.some((sub) => !validSubscription(sub, true)) ||
+    r.subscriptions.length > limit ||
+    !Number.isSafeInteger(r.total) ||
+    (r.total as number) < 0 ||
+    (r.total as number) < r.subscriptions.length ||
+    ('next_after' in r && (typeof r.next_after !== 'string' || !r.next_after))
+  )
+    throw new ApiError(502, 'invalid_response', 'Paged subscription inventory is unavailable.')
+  const subscriptions = r.subscriptions.map(normalizeSubscription)
+  const seen = new Set<string>()
+  for (const subscription of subscriptions) {
+    const key = `${subscription.topic}\0${subscription.name}`
+    if (
+      seen.has(key) ||
+      (options.topic !== undefined && subscription.topic !== options.topic) ||
+      !options.include_deleting && subscription.state === 'deleting'
+    )
+      throw new ApiError(502, 'invalid_response', 'Paged subscription inventory is unavailable.')
+    seen.add(key)
+  }
+  if (
+    (r.next_after !== undefined && subscriptions.length !== limit) ||
+    (!options.after && subscriptions.length !== Math.min(r.total as number, limit))
+  )
+    throw new ApiError(502, 'invalid_response', 'Paged subscription inventory is unavailable.')
+  return {
+    subscriptions,
+    total: r.total as number,
+    ...(r.next_after ? { next_after: r.next_after as string } : {}),
+  }
 }
 
 export interface FilterSample {
