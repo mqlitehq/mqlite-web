@@ -25,6 +25,8 @@ const TTL_UNITS = [
   { label: 'days', ms: 86_400_000 },
 ]
 
+const MAX_SUBSCRIPTION_TTL_MS = 3650 * 86_400_000
+
 export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string) => void }) {
   const { topics, subscriptions, metrics, loading, err, reload } = useTopology()
   const [creating, setCreating] = useState(false)
@@ -161,8 +163,13 @@ function NewSubscription({ topics, onClose, onDone }: { topics: string[]; onClos
   async function save() {
     if (!topic.trim() || !name.trim() || busy) return
     const ttlMs = ttl === '' ? undefined : Number(ttl) * Number(ttlUnit)
-    if (ttlMs !== undefined && (!Number.isSafeInteger(ttlMs) || ttlMs <= 0)) {
-      setErr('TTL must be a positive whole-millisecond duration, or left blank for a permanent subscription.')
+    if (
+      ttlMs !== undefined &&
+      (!Number.isSafeInteger(ttlMs) || ttlMs <= 0 || ttlMs > MAX_SUBSCRIPTION_TTL_MS)
+    ) {
+      setErr(
+        'TTL must be a positive whole-millisecond duration no longer than 10 years, or left blank for a permanent subscription.',
+      )
       return
     }
     setBusy(true)
@@ -226,7 +233,8 @@ function NewSubscription({ topics, onClose, onDone }: { topics: string[]; onClos
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-faint">
           Starts at first creation and never renews. At expiry it becomes unavailable; cleanup discards retained messages
-          and removes it. Delete explicitly when normal work finishes.
+          and removes it. The console maximum is 10 years (3,650 fixed 24-hour days). Delete explicitly when normal work
+          finishes.
         </p>
       </div>
       {err && (
