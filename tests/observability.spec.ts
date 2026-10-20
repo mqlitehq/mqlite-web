@@ -941,27 +941,18 @@ test('nonempty queue deletion requires explicit force and warns about locked ext
   expect(deleted).toBe(1)
 })
 
-test('accepted deletion exposes deleting state and checks completion without repeating force', async ({ page }) => {
+test('accepted deletion checks completion by refreshing inventory without replaying delete', async ({ page }) => {
   const broker = await setup(page)
   const snapshot = broker.observation as Observation
   const requests: unknown[] = []
   await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
     requests.push(route.request().postDataJSON())
-    if (requests.length === 1) {
-      broker.queueState = 'deleting'
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: '{"deleted":false,"state":"deleting"}',
-      })
-      return
-    }
-    broker.queuePresent = false
-    snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
+    expect(requests).toHaveLength(1)
+    broker.queueState = 'deleting'
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: '{"deleted":true,"state":"deleted"}',
+      body: '{"deleted":false,"state":"deleting"}',
     })
   })
   await page.goto('/')
@@ -975,33 +966,25 @@ test('accepted deletion exposes deleting state and checks completion without rep
   await expect(dialog.getByRole('status')).toContainText('Deletion was accepted')
   await expect(page.getByText('cleanup in progress · name reserved')).toBeVisible()
   await expect(page.getByRole('button', { name: '+ send', exact: true })).toHaveCount(0)
+  broker.queuePresent = false
+  snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
   await dialog.getByRole('button', { name: 'check deletion', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('row').filter({ hasText: 'orders' })).toHaveCount(0)
-  expect(requests).toEqual([{ name: 'orders', force: true }, { name: 'orders' }])
+  expect(requests).toEqual([{ name: 'orders', force: true }])
 })
 
-test('pending deletion treats a later not-found as completed cleanup', async ({ page }) => {
+test('pending check cannot delete a same-name replacement', async ({ page }) => {
   const broker = await setup(page)
-  const snapshot = broker.observation as Observation
   const requests: unknown[] = []
   await page.route('**/mqlite.v1.AdminService/DeleteQueue', async (route) => {
     requests.push(route.request().postDataJSON())
-    if (requests.length === 1) {
-      broker.queueState = 'deleting'
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: '{"deleted":false,"state":"deleting"}',
-      })
-      return
-    }
-    broker.queuePresent = false
-    snapshot.queues = snapshot.queues!.filter((q) => q.queue !== 'orders')
+    expect(requests).toHaveLength(1)
+    broker.queueState = 'deleting'
     await route.fulfill({
-      status: 404,
+      status: 200,
       contentType: 'application/json',
-      body: '{"code":"not_found","message":"queue not found"}',
+      body: '{"deleted":false,"state":"deleting"}',
     })
   })
   await page.goto('/')
@@ -1013,8 +996,10 @@ test('pending deletion treats a later not-found as completed cleanup', async ({ 
   await dialog.getByRole('checkbox', { name: 'Force deletion and permanently discard every message state' }).check()
   await dialog.getByRole('button', { name: 'confirm delete', exact: true }).click()
   await expect(dialog.getByRole('status')).toContainText('Deletion was accepted')
+  broker.queueState = 'active'
   await dialog.getByRole('button', { name: 'check deletion', exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('row').filter({ hasText: 'orders' })).toHaveCount(0)
-  expect(requests).toEqual([{ name: 'orders', force: true }, { name: 'orders' }])
+  await expect(page.getByRole('row').filter({ hasText: 'orders' })).toHaveCount(1)
+  await expect(page.getByRole('row').filter({ hasText: 'orders' }).getByText('deleting')).toHaveCount(0)
+  expect(requests).toEqual([{ name: 'orders', force: true }])
 })
