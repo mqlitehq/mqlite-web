@@ -116,6 +116,15 @@ operation as unsupported.
 
 ## Subscription deletion
 
+The create form can set an optional fixed lifetime. The broker stores one
+absolute deadline from the first successful creation; publishing, receiving,
+filter edits, and ordinary retries never extend it. At the deadline the
+subscription becomes unavailable and expiry is treated as prior authorization
+to discard any retained messages during bounded cleanup. Leave the field blank
+for a permanent subscription. Explicit deletion remains the normal completion
+path for request/reply work; the lifetime is a cleanup backstop when a caller is
+lost or forgets to delete.
+
 The subscription detail page deletes one exact `topic/name` mapping and requires
 that full pair as confirmation. Deletion is empty-only by default. The force
 choice appears only when the latest retained-message total is greater than zero,

@@ -12,10 +12,18 @@ import {
   Input,
   Label,
   PageHeader,
+  Select,
   Spinner,
 } from '../components/ui.js'
 import { FilterEditor } from '../components/FilterEditor.js'
 import { PublishPanel } from '../components/Composer.js'
+
+const TTL_UNITS = [
+  { label: 'seconds', ms: 1000 },
+  { label: 'minutes', ms: 60_000 },
+  { label: 'hours', ms: 3_600_000 },
+  { label: 'days', ms: 86_400_000 },
+]
 
 export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string) => void }) {
   const { topics, subscriptions, metrics, loading, err, reload } = useTopology()
@@ -145,15 +153,22 @@ function NewSubscription({ topics, onClose, onDone }: { topics: string[]; onClos
   const [topic, setTopic] = useState('')
   const [name, setName] = useState('')
   const [expr, setExpr] = useState('')
+  const [ttl, setTTL] = useState('')
+  const [ttlUnit, setTTLUnit] = useState(String(TTL_UNITS[1].ms))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   async function save() {
     if (!topic.trim() || !name.trim() || busy) return
+    const ttlMs = ttl === '' ? undefined : Number(ttl) * Number(ttlUnit)
+    if (ttlMs !== undefined && (!Number.isSafeInteger(ttlMs) || ttlMs <= 0)) {
+      setErr('TTL must be a positive whole-millisecond duration, or left blank for a permanent subscription.')
+      return
+    }
     setBusy(true)
     setErr('')
     try {
-      await subscribe(topic.trim(), name.trim(), expr.trim() || undefined)
+      await subscribe(topic.trim(), name.trim(), expr.trim() || undefined, ttlMs)
       onDone()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'subscribe failed')
@@ -187,6 +202,32 @@ function NewSubscription({ topics, onClose, onDone }: { topics: string[]; onClos
       </div>
       <div className="mt-3">
         <FilterEditor expr={expr} onChange={setExpr} />
+      </div>
+      <div className="mt-3">
+        <Label>fixed lifetime (optional)</Label>
+        <div className="flex gap-2">
+          <Input
+            aria-label="subscription lifetime"
+            type="number"
+            min="1"
+            step="1"
+            className="w-28"
+            value={ttl}
+            onChange={(e) => setTTL(e.target.value)}
+            placeholder="permanent"
+          />
+          <Select aria-label="subscription lifetime unit" value={ttlUnit} onChange={(e) => setTTLUnit(e.target.value)}>
+            {TTL_UNITS.map((unit) => (
+              <option key={unit.ms} value={unit.ms}>
+                {unit.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <p className="mt-1 text-[11px] leading-relaxed text-faint">
+          Starts at first creation and never renews. At expiry it becomes unavailable; cleanup discards retained messages
+          and removes it. Delete explicitly when normal work finishes.
+        </p>
       </div>
       {err && (
         <div className="mt-3">

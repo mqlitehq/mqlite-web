@@ -200,11 +200,12 @@ export async function listQueues(): Promise<QueueInfo[]> {
 export function createQueue(name: string, config: QueueConfig = {}): Promise<unknown> {
   return rpc('/mqlite.v1.AdminService/CreateQueue', { name, config })
 }
-export function subscribe(topic: string, name: string, expr?: string): Promise<unknown> {
+export function subscribe(topic: string, name: string, expr?: string, ttlMs?: number): Promise<unknown> {
   return rpc('/mqlite.v1.AdminService/Subscribe', {
     topic,
     name,
     ...(expr ? { filter: { expr } } : {}),
+    ...(ttlMs !== undefined ? { ttl_ms: ttlMs } : {}),
   })
 }
 // The broker checks every message state transactionally before accepting an
@@ -280,6 +281,14 @@ interface WireSubscription {
   name: string
   expr?: string
   state?: 'active' | 'deleting'
+  created_at_ms?: number
+  expires_at_ms?: number
+}
+
+interface WireSubscriptionPageItem extends WireSubscription {
+  state: 'active' | 'deleting'
+  created_at_ms: number
+  expires_at_ms: number
 }
 
 function validSubscription(value: unknown, requireState = false): value is WireSubscription {
@@ -302,6 +311,17 @@ function normalizeSubscription(value: WireSubscription): Subscription {
     expr: value.expr ?? '',
     state: value.state ?? 'active',
   }
+}
+
+function validSubscriptionPageItem(value: unknown): value is WireSubscriptionPageItem {
+  return (
+    validSubscription(value, true) &&
+    Number.isSafeInteger(value.created_at_ms) &&
+    (value.created_at_ms as number) >= 0 &&
+    Number.isSafeInteger(value.expires_at_ms) &&
+    (value.expires_at_ms as number) >= 0 &&
+    ((value.expires_at_ms as number) === 0 || (value.expires_at_ms as number) > (value.created_at_ms as number))
+  )
 }
 
 // Every subscription with its topic + filter expression — what ListQueues omits.
@@ -339,7 +359,7 @@ export async function listSubscriptionsPage(
   if (
     !record(r) ||
     !Array.isArray(r.subscriptions) ||
-    r.subscriptions.some((sub) => !validSubscription(sub, true)) ||
+    r.subscriptions.some((sub) => !validSubscriptionPageItem(sub)) ||
     r.subscriptions.length > limit ||
     !Number.isSafeInteger(r.total) ||
     (r.total as number) < 0 ||
@@ -347,7 +367,12 @@ export async function listSubscriptionsPage(
     ('next_after' in r && (typeof r.next_after !== 'string' || !r.next_after))
   )
     throw new ApiError(502, 'invalid_response', 'Paged subscription inventory is unavailable.')
-  const subscriptions = r.subscriptions.map(normalizeSubscription)
+  const subscriptions = r.subscriptions.map((sub) => ({
+    ...normalizeSubscription(sub),
+    state: sub.state,
+    created_at_ms: sub.created_at_ms,
+    expires_at_ms: sub.expires_at_ms,
+  }))
   const seen = new Set<string>()
   for (const subscription of subscriptions) {
     const key = `${subscription.topic}\0${subscription.name}`
