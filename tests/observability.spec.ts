@@ -577,6 +577,49 @@ test('canonical domain labels stay unique, nonempty and forward compatible', () 
   }
 })
 
+test('retired message counters retain their complete event domain', () => {
+  const valid = sample()
+  const retired = valid.messages
+    .filter((row) => row.queue === 'orders')
+    .map((row) => ({ ...row, queue: '' }))
+  valid.messages.push(...retired)
+  expect(isObservation(valid)).toBe(true)
+
+  for (const index of retired.keys()) {
+    const partial = structuredClone(valid)
+    partial.messages.splice(valid.messages.length - retired.length + index, 1)
+    expect(isObservation(partial)).toBe(false)
+  }
+
+  const duplicate = structuredClone(valid)
+  duplicate.messages.push(retired[0])
+  expect(isObservation(duplicate)).toBe(false)
+
+  const emptyEvent = structuredClone(valid)
+  emptyEvent.messages[valid.messages.length - retired.length].event = ''
+  expect(isObservation(emptyEvent)).toBe(false)
+})
+
+test('login accepts a complete retired message aggregate', async ({ page }) => {
+  const broker = await setup(page, 'manage', false)
+  const snapshot = sample()
+  snapshot.messages.push(
+    ...snapshot.messages
+      .filter((row) => row.queue === 'orders')
+      .map((row) => ({ ...row, queue: '' })),
+  )
+  broker.observation = snapshot
+
+  await page.goto('/')
+  await page.locator('input[type=password]').fill('fixture-manage')
+  await page.getByRole('button', { name: 'connect', exact: true }).click()
+
+  await expect(page.getByRole('button', { name: 'sign out', exact: false })).toBeVisible()
+  await expect(page.locator('input[type=password]')).toHaveCount(0)
+  await expect(stat(page, 'total')).toContainText('19')
+  expect(broker.calls.some((path) => path.endsWith('/Observe'))).toBe(true)
+})
+
 test('every required counter row is present before zero can be interpreted', () => {
   const valid = sample()
   expect(valid.storage.operations).toHaveLength(33)
