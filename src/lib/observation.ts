@@ -160,11 +160,16 @@ function validMaintenanceDiagnostics(value: unknown, runs: number, failures: num
   }
 }
 
-function uniqueRows(value: unknown, keys: string[], required: string[] = []): boolean {
+function uniqueRows(
+  value: unknown,
+  keys: string[],
+  required: string[] = [],
+  allowEmpty: string[] = ['error_code'],
+): boolean {
   if (!Array.isArray(value)) return false
   const seen = new Set<string>()
   for (const row of value) {
-    if (!record(row) || keys.some((key) => typeof row[key] !== 'string' || (!row[key] && key !== 'error_code')))
+    if (!record(row) || keys.some((key) => typeof row[key] !== 'string' || (!row[key] && !allowEmpty.includes(key))))
       return false
     const key = JSON.stringify(keys.map((field) => row[field]))
     if (seen.has(key)) return false
@@ -363,7 +368,7 @@ export function isObservation(value: unknown): value is Observation {
   )
     return false
   if (
-    !uniqueRows(value.messages, ['queue', 'event']) ||
+    !uniqueRows(value.messages, ['queue', 'event'], [], ['queue']) ||
     !uniqueRows(value.storage.operations, ['operation', 'outcome', 'error_code']) ||
     !uniqueRows(
       value.maintenance,
