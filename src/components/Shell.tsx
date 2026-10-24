@@ -161,7 +161,7 @@ function BrokerConnection({
       <div
         id={tooltipId}
         role="tooltip"
-        className="pointer-events-none invisible absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg bg-surface p-3 text-left opacity-0 ring-1 ring-border-strong transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+        className="pointer-events-none invisible absolute right-0 top-full z-50 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-lg bg-surface p-3 text-left opacity-0 ring-1 ring-border-strong transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 sm:w-72"
       >
         <span className="block text-[10px] font-medium uppercase tracking-wide text-faint">
           broker connection

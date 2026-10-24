@@ -406,6 +406,12 @@ test('broker connection stays compact and reveals details on hover and keyboard 
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
   ).toBe(true)
+  await connection.hover()
+  await expect(tooltip).toBeVisible()
+  const mobileTooltipBox = await tooltip.boundingBox()
+  expect(mobileTooltipBox).not.toBeNull()
+  expect(mobileTooltipBox!.x).toBeGreaterThanOrEqual(0)
+  expect(mobileTooltipBox!.x + mobileTooltipBox!.width).toBeLessThanOrEqual(390)
 })
 
 test('message lifecycle help distinguishes claims, renewals, retry backoff, and expiry clocks', async ({
@@ -578,7 +584,8 @@ test('monitor login, reload and navigation never request administrative or messa
 }) => {
   const broker = await setup(page, 'monitor', false)
   await page.goto('/')
-  await page.locator('input[type=password]').fill('fixture-monitor')
+  await expect(page.getByLabel('broker URL', { exact: true })).toHaveValue('https://observe.example.test')
+  await page.getByLabel('administrator or monitor token', { exact: true }).fill('fixture-monitor')
   await page.getByRole('button', { name: 'connect', exact: true }).click()
   await expect(page.getByText('monitor · read only')).toBeVisible()
   for (const name of ['queues', 'topics', 'access keys', 'docs'])
