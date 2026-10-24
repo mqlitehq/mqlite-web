@@ -27,6 +27,7 @@ export function ProcessObservation() {
     'all domains': s,
     runtime: {
       sampled_at_ms: s.sampled_at_ms,
+      server_time_ms: s.server_time_ms,
       started_at_ms: s.started_at_ms,
       backend: s.backend,
       runtime: s.runtime,

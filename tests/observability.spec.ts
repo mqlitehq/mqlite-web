@@ -7,6 +7,7 @@ function sample(access: Observation['access'] = 'manage'): Observation {
     access,
     backend: 'memory',
     sampled_at_ms: 1800000005000,
+    server_time_ms: 1800000006000,
     started_at_ms: 1800000000000,
     runtime: {
       schema_version: '5',
@@ -295,6 +296,10 @@ test('canonical queue, anomaly and process measurements share one request and al
 }) => {
   const broker = await setup(page)
   await page.goto('/')
+  const system = page.getByLabel('observation status')
+  await expect(system).toContainText(`broker time (UTC): ${new Date(1800000006000).toISOString()}`)
+  await expect(system).toContainText('queue sample:')
+  await expect(system).toContainText('1s old')
   await expect(stat(page, 'total')).toContainText('19')
   await expect(stat(page, 'active')).toContainText('11')
   await expect(stat(page, 'unexpected states')).toContainText('2')
@@ -456,7 +461,8 @@ test('every canonical field is required and histogram/quantity invariants reject
       let target: Record<string | number, unknown> = copy
       for (const part of path) target = target[part] as Record<string | number, unknown>
       delete target[key]
-      expect(isObservation(copy), `missing ${[...path, key].join('.')}`).toBe(false)
+      const optionalBrokerTime = path.length === 0 && key === 'server_time_ms'
+      expect(isObservation(copy), `missing ${[...path, key].join('.')}`).toBe(optionalBrokerTime)
       walk(child, [...path, key])
     }
   }
@@ -489,6 +495,295 @@ test('every canonical field is required and histogram/quantity invariants reject
     expect(isObservation(copy)).toBe(false)
   }
   expect(isObservation({ ...valid, future_domain: { available: true } })).toBe(true)
+})
+
+test('broker time is optional for old brokers, accepts zero as unavailable, and validates timestamps', () => {
+  const old = sample()
+  delete old.server_time_ms
+  expect(isObservation(old)).toBe(true)
+  const unavailable = sample()
+  unavailable.server_time_ms = 0
+  expect(isObservation(unavailable)).toBe(true)
+  for (const invalid of [-1, 1.5, Number.MAX_SAFE_INTEGER, null, '1800000006000']) {
+    const snapshot = sample() as unknown as Record<string, unknown>
+    snapshot.server_time_ms = invalid
+    expect(isObservation(snapshot), `accepted server_time_ms=${String(invalid)}`).toBe(false)
+  }
+})
+
+test('old broker observation shows unavailable broker time without requesting Status', async ({ page }) => {
+  const broker = await setup(page, 'monitor')
+  const old = sample('monitor')
+  delete old.server_time_ms
+  broker.observation = old
+  await page.goto('/')
+  await expect(page.getByLabel('observation status')).toContainText('broker time (UTC): unavailable')
+  expect(broker.calls.some((path) => path.endsWith('/Status'))).toBe(false)
+})
+
+test('an explicit zero broker time is displayed as unavailable without requesting Status', async ({ page }) => {
+  const broker = await setup(page, 'monitor')
+  const unavailable = sample('monitor')
+  unavailable.server_time_ms = 0
+  broker.observation = unavailable
+  await page.goto('/')
+  await expect(page.getByLabel('observation status')).toContainText('broker time (UTC): unavailable')
+  expect(broker.calls.some((path) => path.endsWith('/Status'))).toBe(false)
+})
+
+test('subscription detail uses a paged lifecycle row and broker time despite browser clock skew', async ({ page }) => {
+  const broker = await setup(page)
+  await page.addInitScript(() => {
+    Date.now = () => 1
+  })
+  const requests: Record<string, unknown>[] = []
+  const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+    topic: 'events',
+    name: `archive-${String(index).padStart(4, '0')}`,
+    expr: '',
+    state: 'active',
+    created_at_ms: 1,
+    expires_at_ms: 0,
+  }))
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, unknown>
+    requests.push(request)
+    const body = request.after
+      ? {
+          subscriptions: [
+            {
+              topic: 'events',
+              name: 'emails',
+              expr: 'subject == "receipt"',
+              state: 'active',
+              created_at_ms: 1799996406000,
+              expires_at_ms: 1800007206000,
+            },
+          ],
+          total: 1001,
+        }
+      : { subscriptions: firstPage, total: 1001, next_after: 'opaque-next' }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  const lifecycle = page.getByLabel('subscription lifecycle')
+  await expect(lifecycle).toContainText(new Date(1799996406000).toISOString())
+  await expect(lifecycle).toContainText(new Date(1800007206000).toISOString())
+  await expect(lifecycle).toContainText('remaining at broker time')
+  await expect(lifecycle).toContainText('2h')
+  await expect(page.getByText('subject == "receipt"', { exact: true })).toBeVisible()
+  expect(requests).toEqual([
+    { topic: 'events', limit: 1000, include_deleting: true },
+    { topic: 'events', after: 'opaque-next', limit: 1000, include_deleting: true },
+  ])
+  expect(broker.calls.some((path) => path.endsWith('/Status'))).toBe(false)
+})
+
+test('a broker observation crossing the fixed deadline blocks subscription actions without rescanning lifecycle', async ({
+  page,
+}) => {
+  const broker = await setup(page)
+  await page.clock.install()
+  const expiresAt = 1800000066000
+  const before = sample()
+  before.server_time_ms = expiresAt - 60_000
+  broker.observation = before
+  let lifecycleScans = 0
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    lifecycleScans++
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [
+          {
+            topic: 'events',
+            name: 'emails',
+            expr: 'subject == "saved"',
+            state: 'active',
+            created_at_ms: 1800000000000,
+            expires_at_ms: expiresAt,
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect(page.getByLabel('subscription lifecycle')).toContainText('1m')
+  await expect(page.getByRole('button', { name: '+ publish', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'edit filter', exact: true }).click()
+  await page
+    .getByPlaceholder('properties["tier"] == "gold" && body_json.amount > 100')
+    .fill('subject == "draft"')
+  expect(lifecycleScans).toBe(1)
+
+  const after = sample()
+  after.server_time_ms = expiresAt
+  broker.observation = after
+  await page.clock.fastForward(5000)
+  await expect(page.getByRole('heading').getByText('expired', { exact: true })).toBeVisible()
+  await expect(page.getByRole('status')).toContainText('Subscription actions are blocked')
+  await expect(page.getByRole('button', { name: '+ publish', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'delete subscription', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'edit filter', exact: true })).toHaveCount(0)
+  await expect(page.getByText('subject == "saved"', { exact: true })).toBeVisible()
+  await expect(page.getByText('subject == "draft"', { exact: true })).toHaveCount(0)
+  expect(lifecycleScans).toBe(1)
+})
+
+test('publishing refreshes message data without rescanning subscription lifecycle', async ({ page }) => {
+  const broker = await setup(page)
+  let lifecycleScans = 0
+  let sends = 0
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    lifecycleScans++
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [
+          {
+            topic: 'events',
+            name: 'emails',
+            expr: '',
+            state: 'active',
+            created_at_ms: 1,
+            expires_at_ms: 0,
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+  await page.route('**/mqlite.v1.QueueService/Send', async (route) => {
+    sends++
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"seq_numbers":[1]}' })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect(page.getByLabel('subscription lifecycle')).toContainText('permanent')
+  expect(lifecycleScans).toBe(1)
+  const observationsBefore = broker.calls.filter((path) => path.endsWith('/Observe')).length
+  await page.getByRole('button', { name: '+ publish', exact: true }).click()
+  await page.getByRole('button', { name: 'publish to events', exact: true }).click()
+  await expect(page.getByText('published — routed to matching subscription(s)', { exact: false })).toBeVisible()
+  await expect.poll(() => sends).toBe(1)
+  await expect
+    .poll(() => broker.calls.filter((path) => path.endsWith('/Observe')).length)
+    .toBeGreaterThan(observationsBefore)
+  expect(lifecycleScans).toBe(1)
+})
+
+test('a saved filter becomes the cancel baseline without another lifecycle scan', async ({ page }) => {
+  await setup(page)
+  let lifecycleScans = 0
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    lifecycleScans++
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [
+          {
+            topic: 'events',
+            name: 'emails',
+            expr: 'subject == "original"',
+            state: 'active',
+            created_at_ms: 1,
+            expires_at_ms: 0,
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+  await page.route('**/mqlite.v1.AdminService/TestFilter', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"valid":true,"ran":false,"matched":false}',
+    })
+  })
+  await page.route('**/mqlite.v1.AdminService/Subscribe', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect(page.getByText('subject == "original"', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'edit filter', exact: true }).click()
+  const editor = page.getByPlaceholder('properties["tier"] == "gold" && body_json.amount > 100')
+  await editor.fill('subject == "saved"')
+  await page.getByRole('button', { name: 'update filter', exact: true }).click()
+  await expect(page.getByText('subject == "saved"', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'edit filter', exact: true }).click()
+  await editor.fill('subject == "unsaved"')
+  await page.getByRole('button', { name: 'cancel', exact: true }).click()
+  await expect(page.getByText('subject == "saved"', { exact: true })).toBeVisible()
+  await expect(page.getByText('subject == "unsaved"', { exact: true })).toHaveCount(0)
+  expect(lifecycleScans).toBe(1)
+})
+
+test('a newer manual lifecycle refresh wins over an older in-flight lookup', async ({ page }) => {
+  const broker = await setup(page)
+  let requests = 0
+  let releaseFirst!: () => void
+  const firstMayFinish = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    requests++
+    const thisRequest = requests
+    if (thisRequest === 1) await firstMayFinish
+    const newer = thisRequest > 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [
+          {
+            topic: 'events',
+            name: 'emails',
+            expr: newer ? 'subject == "new"' : 'subject == "old"',
+            state: 'active',
+            created_at_ms: newer ? 2000 : 1000,
+            expires_at_ms: 0,
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect.poll(() => requests).toBe(1)
+  await expect(page.getByLabel('subscription lifecycle')).toContainText('loading…')
+  await expect(page.getByRole('button', { name: '+ publish', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'delete subscription', exact: true })).toHaveCount(0)
+  expect(broker.calls.filter((path) => path.endsWith('/Peek'))).toHaveLength(0)
+
+  await page.getByRole('button', { name: 'refresh', exact: true }).click()
+  await expect(page.getByText('subject == "new"', { exact: true })).toBeVisible()
+  await expect.poll(() => broker.calls.filter((path) => path.endsWith('/Peek')).length).toBe(1)
+  releaseFirst()
+  await expect.poll(() => requests).toBe(2)
+  await page.waitForTimeout(50)
+  await expect(page.getByText('subject == "new"', { exact: true })).toBeVisible()
+  await expect(page.getByText('subject == "old"', { exact: true })).toHaveCount(0)
+  expect(broker.calls.filter((path) => path.endsWith('/Peek'))).toHaveLength(1)
 })
 
 test('a stalled poll expires freshness without overlapping requests', async ({ page }) => {

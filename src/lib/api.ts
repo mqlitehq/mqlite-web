@@ -5,6 +5,7 @@
 
 import { isObservation, type Observation } from './observation.js'
 import { getToken, clearToken, setToken, getEndpoint } from './auth.js'
+import { isDisplayableEpochMs } from './date-time.js'
 import type {
   AccessKey,
   BrokerStatus,
@@ -21,6 +22,7 @@ import type {
   QueueInfo,
   Subscription,
   SubscriptionPage,
+  SubscriptionPageItem,
   WireMessage,
 } from './types.js'
 
@@ -316,10 +318,8 @@ function normalizeSubscription(value: WireSubscription): Subscription {
 function validSubscriptionPageItem(value: unknown): value is WireSubscriptionPageItem {
   return (
     validSubscription(value, true) &&
-    Number.isSafeInteger(value.created_at_ms) &&
-    (value.created_at_ms as number) >= 0 &&
-    Number.isSafeInteger(value.expires_at_ms) &&
-    (value.expires_at_ms as number) >= 0 &&
+    isDisplayableEpochMs(value.created_at_ms) &&
+    (value.expires_at_ms === 0 || isDisplayableEpochMs(value.expires_at_ms)) &&
     ((value.expires_at_ms as number) === 0 || (value.expires_at_ms as number) > (value.created_at_ms as number))
   )
 }
@@ -395,6 +395,32 @@ export async function listSubscriptionsPage(
     subscriptions,
     total: r.total as number,
     ...(r.next_after ? { next_after: r.next_after as string } : {}),
+  }
+}
+
+// Resolve one exact lifecycle row without turning the bounded inventory API into
+// a high-frequency topology poll. Cursors are opaque and a repeated cursor is an
+// invalid response rather than a reason to loop forever.
+export async function findSubscription(
+  topic: string,
+  name: string,
+): Promise<SubscriptionPageItem | undefined> {
+  let after: string | undefined
+  const seen = new Set<string>()
+  for (;;) {
+    const page = await listSubscriptionsPage({
+      topic,
+      ...(after ? { after } : {}),
+      limit: 1000,
+      include_deleting: true,
+    })
+    const exact = page.subscriptions.find((subscription) => subscription.name === name)
+    if (exact) return exact
+    if (!page.next_after) return undefined
+    if (seen.has(page.next_after))
+      throw new ApiError(502, 'invalid_response', 'Paged subscription inventory repeated a cursor.')
+    seen.add(page.next_after)
+    after = page.next_after
   }
 }
 

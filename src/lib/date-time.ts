@@ -1,5 +1,14 @@
 const pad = (value: number) => String(value).padStart(2, '0')
 
+// JavaScript accepts safe integers slightly beyond its Date range. Keep wire
+// timestamps inside the console's explicit four-digit-year display contract.
+export function isDisplayableEpochMs(value: unknown, allowZero = true): value is number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || (!allowZero && value === 0)) return false
+  const date = new Date(Number(value))
+  const year = date.getUTCFullYear()
+  return Number.isFinite(date.getTime()) && year >= 1 && year <= 9999
+}
+
 // Date-time inputs represent local wall time, with minutes as their precision.
 export function formatDateTime(date: Date): string {
   const year = date.getFullYear()

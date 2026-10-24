@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { subscriptionRemaining } from '../src/views/Detail.js'
 
 interface Broker {
   active: boolean
@@ -67,6 +68,15 @@ function fullSubscriptionPage() {
     created_at_ms: 1,
     expires_at_ms: 0,
   }))
+}
+
+function activeSubscriptionPage() {
+  return {
+    subscriptions: [
+      { topic: 'events', name: 'emails', expr: '', state: 'active', created_at_ms: 1, expires_at_ms: 0 },
+    ],
+    total: 1,
+  }
 }
 
 test('empty subscription deletion requires the exact topic/name and never sends force', async ({ page }) => {
@@ -204,6 +214,12 @@ test('pending subscription deletion scans scoped pages and never replays delete'
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
     const request = route.request().postDataJSON() as Record<string, unknown>
+    if (deletes === 0)
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(activeSubscriptionPage()),
+      })
     pageRequests.push(request)
     if (pageRequests.length === 1)
       return route.fulfill({
@@ -284,6 +300,12 @@ for (const outcome of ['server error', 'redirect', 'transport', 'malformed ackno
       })
     })
     await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+      if (deletes === 0)
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(activeSubscriptionPage()),
+        })
       pageRequests.push(route.request().postDataJSON())
       await route.fulfill({
         status: 200,
@@ -330,6 +352,12 @@ test('reconciliation rejects a repeated cursor and never replays delete', async 
     })
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (deletes === 0)
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(activeSubscriptionPage()),
+      })
     pageRequests.push(route.request().postDataJSON() as Record<string, unknown>)
     await route.fulfill({
       status: 200,
@@ -374,6 +402,12 @@ test('reconciliation rejects a first page missing its required cursor and never 
     })
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (deletes === 0)
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(activeSubscriptionPage()),
+      })
     pageRequests.push(route.request().postDataJSON() as Record<string, unknown>)
     await route.fulfill({
       status: 200,
@@ -510,6 +544,109 @@ test('reconciliation rejects lifecycle rows without explicit fixed-lifetime fiel
   expect(deletes).toBe(1)
 })
 
+test('subscription detail shows a permanent lifetime without inventing a browser-clock deadline', async ({ page }) => {
+  await setup(page)
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [
+          { topic: 'events', name: 'emails', expr: '', state: 'active', created_at_ms: 1000, expires_at_ms: 0 },
+        ],
+        total: 1,
+      }),
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  const lifecycle = page.getByLabel('subscription lifecycle')
+  await expect(lifecycle).toContainText('permanent · no expiry')
+  await expect(lifecycle.getByText('permanent', { exact: true })).toBeVisible()
+})
+
+test('subscription detail reports a lifecycle row that has expired or been deleted', async ({ page }) => {
+  await setup(page)
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ subscriptions: [], total: 0 }),
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect(page.getByRole('status')).toContainText('It may have expired or been deleted')
+  await expect(page.getByRole('button', { name: 'delete subscription', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '+ publish', exact: true })).toHaveCount(0)
+})
+
+test('an authoritative missing lifecycle scan replaces a stale deleting state', async ({ page }) => {
+  await setup(page)
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [{ topic: 'events', name: 'emails', expr: '', state: 'deleting' }],
+      }),
+    })
+  })
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ subscriptions: [], total: 0 }),
+    })
+  })
+
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect(page.getByRole('status')).toContainText('not present in the latest lifecycle scan')
+  await expect(page.getByText('Deletion has been accepted', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('deleting', { exact: true })).toHaveCount(0)
+})
+
+test('subscription detail rejects an undisplayable lifecycle timestamp instead of crashing', async ({ page }) => {
+  await setup(page)
+  await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subscriptions: [
+          {
+            topic: 'events',
+            name: 'emails',
+            expr: '',
+            state: 'active',
+            created_at_ms: 1000,
+            expires_at_ms: Number.MAX_SAFE_INTEGER,
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
+  await page.getByRole('button', { name: /emails/ }).click()
+  await expect(page.getByLabel('subscription lifecycle').getByRole('alert')).toContainText(
+    'Paged subscription inventory is unavailable',
+  )
+})
+
+test('remaining lifetime is derived only from broker time', () => {
+  expect(subscriptionRemaining(0, 1000)).toBe('permanent')
+  expect(subscriptionRemaining(2000)).toContain('broker time not reported')
+  expect(subscriptionRemaining(2000, 2000)).toBe('expired')
+  expect(subscriptionRemaining(1999, 2000)).toBe('expired')
+  expect(subscriptionRemaining(3_602_000, 2000)).toBe('1h')
+})
+
 test('older brokers keep the subscription visible and explain that deletion is unsupported', async ({ page }) => {
   const broker = await setup(page)
   broker.total = 0
@@ -519,5 +656,5 @@ test('older brokers keep the subscription visible and explain that deletion is u
   await expect(dialog.getByRole('alert')).toContainText('does not support deleting subscriptions')
   await expect(dialog).toBeVisible()
   expect(broker.calls.filter((path) => path.endsWith('/DeleteSubscription'))).toHaveLength(1)
-  expect(broker.calls.some((path) => path.endsWith('/ListSubscriptionsPage'))).toBe(false)
+  expect(broker.calls.some((path) => path.endsWith('/ListSubscriptionsPage'))).toBe(true)
 })

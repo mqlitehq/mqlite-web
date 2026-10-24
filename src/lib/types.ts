@@ -119,6 +119,8 @@ export interface BrokerStatus {
   subscriptions: number
   uptime_ms: number
   auth: boolean
+  // Older brokers omit this field; zero is the explicit unavailable sentinel.
+  server_time_ms?: number
 }
 
 // AuthService metadata never includes a token or its digest.
