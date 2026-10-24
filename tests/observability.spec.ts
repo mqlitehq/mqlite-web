@@ -374,7 +374,7 @@ test('message lifecycle help distinguishes claims, renewals, retry backoff, and 
     .getByRole('heading', { name: "A message's life — states & settlement", exact: true })
     .locator('..')
   await expect(lifecycle).toContainText('does not change state, issue a new delivery, or increment the count')
-  await expect(lifecycle).toContainText('ordinary Receive number 10 is a complete final attempt')
+  await expect(lifecycle).toContainText('ordinary Peek-Lock Receive number 10 is a complete final attempt')
   await expect(lifecycle).toContainText('scheduled state as retry backoff')
   await expect(lifecycle).toContainText('does not enforce max_delivery_count')
   await expect(lifecycle).toContainText('lock lease')
