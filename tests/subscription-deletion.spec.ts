@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { subscriptionRemaining } from '../src/views/Detail.js'
 
 interface Broker {
@@ -30,6 +30,8 @@ async function setup(page: Page): Promise<Broker> {
       return respond({
         subscriptions: broker.active ? [{ topic: 'events', name: 'emails', expr: '' }] : [],
       })
+    if (path.endsWith('/ListSubscriptionsPage'))
+      return respond({ code: 'unimplemented', message: 'no such path' }, 404)
     if (path.endsWith('/Stats'))
       return respond({
         queue: 'emails',
@@ -70,13 +72,24 @@ function fullSubscriptionPage() {
   }))
 }
 
-function activeSubscriptionPage() {
+function activeSubscriptionPage(state: 'active' | 'deleting' = 'active') {
   return {
     subscriptions: [
-      { topic: 'events', name: 'emails', expr: '', state: 'active', created_at_ms: 1, expires_at_ms: 0 },
+      { topic: 'events', name: 'emails', expr: '', state, created_at_ms: 1, expires_at_ms: 0 },
     ],
     total: 1,
   }
+}
+
+async function fulfillGlobalInventory(route: Route, broker: Broker): Promise<boolean> {
+  const request = route.request().postDataJSON() as Record<string, unknown>
+  if (request.topic !== undefined) return false
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(broker.active ? activeSubscriptionPage() : { subscriptions: [], total: 0 }),
+  })
+  return true
 }
 
 test('empty subscription deletion requires the exact topic/name and never sends force', async ({ page }) => {
@@ -213,6 +226,7 @@ test('pending subscription deletion scans scoped pages and never replays delete'
     })
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (await fulfillGlobalInventory(route, broker)) return
     const request = route.request().postDataJSON() as Record<string, unknown>
     if (deletes === 0)
       return route.fulfill({
@@ -270,7 +284,7 @@ test('pending subscription deletion scans scoped pages and never replays delete'
 
 for (const outcome of ['server error', 'redirect', 'transport', 'malformed acknowledgement'] as const) {
   test(`${outcome} becomes outcome_unknown and reconciles without replay`, async ({ page }) => {
-    await setup(page)
+    const broker = await setup(page)
     let deletes = 0
     let redirectTargets = 0
     const pageRequests: unknown[] = []
@@ -300,6 +314,7 @@ for (const outcome of ['server error', 'redirect', 'transport', 'malformed ackno
       })
     })
     await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+      if (await fulfillGlobalInventory(route, broker)) return
       if (deletes === 0)
         return route.fulfill({
           status: 200,
@@ -352,6 +367,7 @@ test('reconciliation rejects a repeated cursor and never replays delete', async 
     })
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (await fulfillGlobalInventory(route, broker)) return
     if (deletes === 0)
       return route.fulfill({
         status: 200,
@@ -402,6 +418,7 @@ test('reconciliation rejects a first page missing its required cursor and never 
     })
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (await fulfillGlobalInventory(route, broker)) return
     if (deletes === 0)
       return route.fulfill({
         status: 200,
@@ -526,6 +543,7 @@ test('reconciliation rejects lifecycle rows without explicit fixed-lifetime fiel
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"deleted":false,"state":"deleting"}' })
   })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (await fulfillGlobalInventory(route, broker)) return
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -567,8 +585,9 @@ test('subscription detail shows a permanent lifetime without inventing a browser
 })
 
 test('subscription detail reports a lifecycle row that has expired or been deleted', async ({ page }) => {
-  await setup(page)
+  const broker = await setup(page)
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (await fulfillGlobalInventory(route, broker)) return
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -585,20 +604,12 @@ test('subscription detail reports a lifecycle row that has expired or been delet
 
 test('an authoritative missing lifecycle scan replaces a stale deleting state', async ({ page }) => {
   await setup(page)
-  await page.route('**/mqlite.v1.AdminService/ListSubscriptions', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        subscriptions: [{ topic: 'events', name: 'emails', expr: '', state: 'deleting' }],
-      }),
-    })
-  })
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, unknown>
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ subscriptions: [], total: 0 }),
+      body: JSON.stringify(request.topic ? { subscriptions: [], total: 0 } : activeSubscriptionPage('deleting')),
     })
   })
 
@@ -611,8 +622,9 @@ test('an authoritative missing lifecycle scan replaces a stale deleting state', 
 })
 
 test('subscription detail rejects an undisplayable lifecycle timestamp instead of crashing', async ({ page }) => {
-  await setup(page)
+  const broker = await setup(page)
   await page.route('**/mqlite.v1.AdminService/ListSubscriptionsPage', async (route) => {
+    if (await fulfillGlobalInventory(route, broker)) return
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -656,5 +668,6 @@ test('older brokers keep the subscription visible and explain that deletion is u
   await expect(dialog.getByRole('alert')).toContainText('does not support deleting subscriptions')
   await expect(dialog).toBeVisible()
   expect(broker.calls.filter((path) => path.endsWith('/DeleteSubscription'))).toHaveLength(1)
-  expect(broker.calls.some((path) => path.endsWith('/ListSubscriptionsPage'))).toBe(true)
+  expect(broker.calls.filter((path) => path.endsWith('/ListSubscriptionsPage'))).toHaveLength(1)
+  expect(broker.calls.filter((path) => path.endsWith('/ListSubscriptions'))).toHaveLength(1)
 })

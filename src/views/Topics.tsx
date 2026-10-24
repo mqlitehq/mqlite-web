@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { subscribe } from '../lib/api.js'
 import { useTopology, type Topic } from '../lib/useTopology.js'
-import type { Metrics } from '../lib/types.js'
+import type { Metrics, Subscription, SubscriptionPageItem } from '../lib/types.js'
+import { fmtMs, fmtUTC } from '../lib/format.js'
 import {
   Badge,
   Button,
@@ -26,11 +27,34 @@ const TTL_UNITS = [
 ]
 
 const MAX_SUBSCRIPTION_TTL_MS = 3650 * 86_400_000
+const EXPIRING_SOON_MS = 24 * 60 * 60 * 1000
+
+type LifecycleInventoryState = 'loading' | 'ready' | 'legacy' | 'error'
 
 export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string) => void }) {
-  const { topics, subscriptions, metrics, loading, err, reload } = useTopology()
+  const {
+    topics,
+    subscriptions,
+    subscriptionInventoryMode,
+    metrics,
+    loading,
+    err,
+    reload,
+    reloadObservation,
+    observation,
+    current: observationCurrent,
+  } = useTopology()
   const [creating, setCreating] = useState(false)
   const [publishTo, setPublishTo] = useState<string | null>(null)
+  const lifecycleDisplayState: LifecycleInventoryState =
+    subscriptionInventoryMode === 'paged'
+      ? 'ready'
+      : subscriptionInventoryMode === 'legacy'
+        ? 'legacy'
+        : err
+          ? 'error'
+          : 'loading'
+  const brokerTime = observation?.server_time_ms || undefined
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -71,7 +95,6 @@ export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string)
           <ErrorBanner message={err} />
         </div>
       )}
-
       {loading ? (
         <Spinner label="loading topics" />
       ) : topics.length === 0 ? (
@@ -84,9 +107,12 @@ export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string)
               topic={t}
               metrics={metrics}
               onOpenSub={onOpenSub}
+              lifecycleState={lifecycleDisplayState}
+              brokerTime={brokerTime}
+              observationCurrent={observationCurrent}
               publishing={publishTo === t.name}
               onTogglePublish={() => setPublishTo((p) => (p === t.name ? null : t.name))}
-              onPublished={reload}
+              onPublished={reloadObservation}
             />
           ))}
         </div>
@@ -99,6 +125,9 @@ function TopicCard({
   topic,
   metrics,
   onOpenSub,
+  lifecycleState,
+  brokerTime,
+  observationCurrent,
   publishing,
   onTogglePublish,
   onPublished,
@@ -106,24 +135,44 @@ function TopicCard({
   topic: Topic
   metrics: Record<string, Metrics>
   onOpenSub: (topic: string, name: string) => void
+  lifecycleState: LifecycleInventoryState
+  brokerTime?: number
+  observationCurrent: boolean
   publishing: boolean
   onTogglePublish: () => void
   onPublished: () => void
 }) {
+  const canPublish = topic.subscriptions.some((subscription) =>
+    subscriptionAcceptsPublish(subscription, brokerTime),
+  )
+  const publishOpen = publishing && canPublish
   return (
     <Card>
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-faint">◇</span>
-          <span className="font-semibold">{topic.name}</span>
-          <Badge tone="neutral">{topic.subscriptions.length} sub</Badge>
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-faint">◇</span>
+            <span className="truncate font-semibold">{topic.name}</span>
+            <Badge tone="neutral">{topic.subscriptions.length} sub</Badge>
+          </div>
+          {!canPublish && (
+            <div className="mt-1 text-[11px] text-warn">
+              publishing unavailable · all subscriptions are deleting or expired
+            </div>
+          )}
         </div>
-        <Button variant="outline" size="sm" onClick={onTogglePublish}>
-          {publishing ? 'close' : 'publish'}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!canPublish}
+          title={canPublish ? undefined : 'All subscriptions are deleting or expired.'}
+          onClick={onTogglePublish}
+        >
+          {publishOpen ? 'close' : 'publish'}
         </Button>
       </div>
 
-      {publishing && <PublishPanel topic={topic.name} onPublished={onPublished} />}
+      {publishOpen && <PublishPanel topic={topic.name} onPublished={onPublished} />}
 
       <div className="divide-y divide-border/60">
         {topic.subscriptions.map((s) => {
@@ -132,22 +181,96 @@ function TopicCard({
             <button
               key={s.name}
               onClick={() => onOpenSub(topic.name, s.name)}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/40"
+              className="flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/40 sm:items-center"
             >
-              <span className="w-32 shrink-0 truncate font-medium text-foreground">{s.name}</span>
-              <span className="min-w-0 flex-1 truncate">
-                <FilterCode expr={s.expr} />
+              <span className="min-w-0 flex-1 sm:grid sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-x-3">
+                <span className="block truncate font-medium text-foreground">{s.name}</span>
+                <span className="mt-0.5 block min-w-0 truncate sm:mt-0">
+                  <FilterCode expr={s.expr} />
+                </span>
+                <SubscriptionLifecycle
+                  subscription={s}
+                  inventoryState={lifecycleState}
+                  brokerTime={brokerTime}
+                  observationCurrent={observationCurrent}
+                />
               </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                {m?.active ?? 'unknown'} active
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-xs tabular-nums text-muted-foreground">{m?.active ?? 'unknown'} active</span>
+                {m && m.dead_lettered > 0 && <Badge tone="danger">{m.dead_lettered} dlq</Badge>}
+                <span className="text-faint">→</span>
               </span>
-              {m && m.dead_lettered > 0 && <Badge tone="danger">{m.dead_lettered} dlq</Badge>}
-              <span className="shrink-0 text-faint">→</span>
             </button>
           )
         })}
       </div>
     </Card>
+  )
+}
+
+function lifecycleSubscription(subscription: Subscription): subscription is SubscriptionPageItem {
+  return 'created_at_ms' in subscription && 'expires_at_ms' in subscription
+}
+
+function subscriptionAcceptsPublish(subscription: Subscription, brokerTime?: number): boolean {
+  if (subscription.state === 'deleting') return false
+  return !(
+    brokerTime !== undefined &&
+    lifecycleSubscription(subscription) &&
+    subscription.expires_at_ms !== 0 &&
+    brokerTime >= subscription.expires_at_ms
+  )
+}
+
+function SubscriptionLifecycle({
+  subscription,
+  inventoryState,
+  brokerTime,
+  observationCurrent,
+}: {
+  subscription: Subscription
+  inventoryState: LifecycleInventoryState
+  brokerTime?: number
+  observationCurrent: boolean
+}) {
+  let text = inventoryState === 'loading' ? 'lifecycle loading…' : 'lifecycle unavailable'
+  let className = 'text-faint'
+  let title: string | undefined
+  if (lifecycleSubscription(subscription)) {
+    const deleting = subscription.state === 'deleting'
+    const expiresAt = subscription.expires_at_ms
+    if (expiresAt === 0) {
+      text = deleting ? 'permanent · deleting' : 'permanent'
+      className = deleting ? 'text-danger' : 'text-muted-foreground'
+    } else {
+      const exact = fmtUTC(expiresAt)
+      const remaining = brokerTime === undefined ? undefined : expiresAt - brokerTime
+      const expired = remaining !== undefined && remaining <= 0
+      title = fmtUTC(expiresAt)
+      if (deleting) {
+        text = expired ? `expired ${exact} · deleting` : `expires ${exact} · deleting`
+        className = 'text-danger'
+      } else if (expired) {
+        text = `expired ${exact}`
+        className = 'text-danger'
+      } else if (remaining === undefined) {
+        text = `expires ${exact} · remaining unavailable`
+        className = 'text-muted-foreground'
+      } else {
+        text = `${remaining <= EXPIRING_SOON_MS ? 'expiring soon · ' : ''}expires ${exact} · ${fmtMs(remaining)} left`
+        className = remaining <= EXPIRING_SOON_MS ? 'text-warn' : 'text-muted-foreground'
+      }
+      if (!observationCurrent && brokerTime !== undefined) text += ' · stale broker sample'
+    }
+  }
+  return (
+    <span
+      aria-label={`subscription lifecycle ${subscription.name}`}
+      className={`mt-1 block min-w-0 break-words text-[11px] tabular-nums sm:col-span-2 ${className}`}
+      title={title}
+    >
+      {text}
+    </span>
   )
 }
 

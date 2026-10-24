@@ -199,3 +199,11 @@ credential. Managed `send` and `listen` keys retain their existing API permissio
 Older brokers use the existing List/Stats endpoints only when Observe reports an
 unsupported route. Missing per-queue data makes aggregate counts unknown; auth,
 network, invalid-response and server errors never trigger this fallback.
+
+Managed topology uses the paged subscription lifecycle inventory, including rows
+being deleted, on initial connection, explicit refresh, and configuration changes.
+On current brokers the five-second poll calls only `Observe`, and message operations
+do not rescan the global inventory. Older brokers poll `Stats` for the cached queue
+topology without listing it again. Opening or refreshing subscription detail performs
+a bounded, topic-scoped lifecycle lookup. If the paged route is absent, older brokers
+use the legacy subscription list and the Topics view marks lifecycle details unavailable.

@@ -114,6 +114,8 @@ async function setup(page: Page, initial: Key[] = []): Promise<Broker> {
       return respond({ ok: true })
     }
     if (path.endsWith('/ListQueues')) return respond({ queues: broker.queues.map((name) => ({ name, kind: 'queue' })) })
+    if (path.endsWith('/ListSubscriptionsPage'))
+      return respond({ code: 'unimplemented', message: 'no such path' }, 404)
     if (path.endsWith('/ListSubscriptions')) return respond({ subscriptions: [] })
     if (path.endsWith('/Stats')) {
       return respond({ queue: body.queue, active: 0, locked: 0, deferred: 0, scheduled: 0, dead_lettered: 0, total: 0, oldest_message_age_ms: 0 })
@@ -749,6 +751,7 @@ test.describe('local date and time entry', () => {
     const broker = await setup(page)
     broker.queues = ['schedule-fixture']
     await page.getByRole('button', { name: 'queues', exact: true }).click()
+    await page.getByRole('button', { name: 'refresh', exact: true }).click()
     await page.getByRole('row').filter({ hasText: 'schedule-fixture' }).click()
     await page.getByRole('button', { name: '+ send', exact: true }).click()
     const schedule = page.getByRole('textbox', { name: 'schedule for', exact: true })

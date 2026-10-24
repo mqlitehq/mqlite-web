@@ -1,13 +1,10 @@
 import { useTopology } from '../lib/useTopology.js'
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ApiError,
   bodySize,
   cancel,
   decodeBody,
   findSubscription,
-  listSubscriptions,
-  observeUnsupported,
   peek,
   subscribe,
 } from '../lib/api.js'
@@ -67,9 +64,12 @@ export function Detail({
     observation,
     queues,
     subscriptions,
+    subscriptionInventoryMode,
     metrics,
     current: observationCurrent,
-    reload: loadStats,
+    reload: reloadAll,
+    reloadObservation,
+    reloadTopology,
     err: observationError,
   } = useTopology()
   const m = metrics[name]
@@ -114,7 +114,7 @@ export function Detail({
   const [editFilter, setEditFilter] = useState(false)
 
   const loadSubscription = useCallback(async () => {
-    if (!isSub || !topic) return
+    if (!isSub || !topic || subscriptionInventoryMode !== 'paged') return
     const request = ++subscriptionRequest.current
     const superseded = () => request !== subscriptionRequest.current
     setSubscriptionLookup('loading')
@@ -136,29 +136,13 @@ export function Detail({
       setSubscriptionLookup('found')
     } catch (cause) {
       if (superseded()) return
-      if (cause instanceof ApiError && observeUnsupported(cause)) {
-        try {
-          const legacy = await listSubscriptions()
-          if (superseded()) return
-          const legacyExpr =
-            legacy.find((subscription) => subscription.topic === topic && subscription.name === name)?.expr ?? ''
-          setExpr(legacyExpr)
-          setSavedExpr(legacyExpr)
-          setSubscriptionInfo(null)
-          setSubscriptionLookup('legacy')
-          return
-        } catch {
-          // Report the lifecycle lookup failure below; legacy metadata is not authoritative.
-        }
-      }
-      if (superseded()) return
       setSubscriptionInfo(null)
       setExpr('')
       setSavedExpr('')
       setSubscriptionLookup('error')
       setSubscriptionError(cause instanceof Error ? cause.message : 'Subscription lifecycle is unavailable.')
     }
-  }, [isSub, name, topic])
+  }, [isSub, name, subscriptionInventoryMode, topic])
 
   const loadMsgs = useCallback(async () => {
     if (blocked) {
@@ -176,13 +160,32 @@ export function Detail({
   }, [blocked, name, tab])
 
   useEffect(() => {
+    if (subscriptionInventoryMode !== 'paged') return
     void loadSubscription()
     return () => {
       // Invalidate an in-flight lookup when the target changes or this detail view
       // unmounts. A later same-name view must never receive its stale result.
       subscriptionRequest.current++
     }
-  }, [loadSubscription])
+  }, [loadSubscription, subscriptionInventoryMode])
+  useEffect(() => {
+    if (!isSub || subscriptionInventoryMode !== 'legacy') return
+    // Capability discovery is broker-scoped. Once the provider selected the
+    // legacy inventory, consume that context row instead of probing Page again.
+    subscriptionRequest.current++
+    setSubscriptionError('')
+    setSubscriptionInfo(null)
+    if (!topologySubscription) {
+      setDeletionAccepted(false)
+      setExpr('')
+      setSavedExpr('')
+      setSubscriptionLookup('missing')
+      return
+    }
+    setExpr(topologySubscription.expr)
+    setSavedExpr(topologySubscription.expr)
+    setSubscriptionLookup('legacy')
+  }, [isSub, subscriptionInventoryMode, topologySubscription])
   useEffect(() => {
     if (lifecycleState === 'deleting') setDeletionAccepted(true)
   }, [lifecycleState])
@@ -197,12 +200,12 @@ export function Detail({
   }, [loadMsgs])
 
   const refreshData = () => {
-    loadStats()
+    reloadObservation()
     loadMsgs()
   }
 
   const refresh = () => {
-    loadStats()
+    reloadAll()
     if (isSub) {
       // Loading blocks the subscription data plane. Its transition back to found
       // drives the single Peek through the loadMsgs effect, avoiding two racing reads.
@@ -239,6 +242,7 @@ export function Detail({
       setSubscriptionInfo((current) => (current ? { ...current, expr: saved } : current))
       setEditFilter(false)
       setNote('filter updated')
+      reloadTopology()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'failed to update filter')
     } finally {
@@ -303,13 +307,13 @@ export function Detail({
                   name={name}
                   total={m?.total}
                   state={deleting ? 'deleting' : queueState}
-                  onRefresh={loadStats}
+                  onRefresh={reloadAll}
                   onDeleting={() => {
                     setDeletionAccepted(true)
-                    loadStats()
+                    reloadAll()
                   }}
                   onDeleted={() => {
-                    loadStats()
+                    reloadAll()
                     onBack()
                   }}
                 />
@@ -320,13 +324,13 @@ export function Detail({
                   name={name}
                   total={m?.total}
                   state={deleting ? 'deleting' : subscriptionState}
-                  onRefresh={loadStats}
+                  onRefresh={reloadAll}
                   onDeleting={() => {
                     setDeletionAccepted(true)
-                    loadStats()
+                    reloadAll()
                   }}
                   onDeleted={() => {
-                    loadStats()
+                    reloadAll()
                     onBack()
                   }}
                 />
