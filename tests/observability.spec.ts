@@ -362,6 +362,35 @@ test('broker target labels follow browser origins without exposing endpoint secr
   })
 })
 
+test('message lifecycle help distinguishes claims, renewals, retry backoff, and expiry clocks', async ({
+  page,
+}) => {
+  await setup(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.locator('nav').getByRole('button', { name: 'docs', exact: true }).click()
+
+  const lifecycle = page
+    .getByRole('heading', { name: "A message's life — states & settlement", exact: true })
+    .locator('..')
+  await expect(lifecycle).toContainText('does not change state, issue a new delivery, or increment the count')
+  await expect(lifecycle).toContainText('ordinary Receive number 10 is a complete final attempt')
+  await expect(lifecycle).toContainText('scheduled state as retry backoff')
+  await expect(lifecycle).toContainText('does not enforce max_delivery_count')
+  await expect(lifecycle).toContainText('lock lease')
+  await expect(lifecycle).toContainText('message TTL')
+  await expect(lifecycle).toContainText('subscription lifetime')
+
+  const viewport = page.getByLabel("A message's life — states & settlement diagram viewport")
+  const dimensions = await viewport.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(dimensions.clientWidth).toBeGreaterThan(0)
+  expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
 for (const topologyResult of ['success', 'failure'] as const) {
   test(`initial manage view waits for delayed topology ${topologyResult}`, async ({ page }) => {
     const broker = await setup(page)
@@ -1511,6 +1540,7 @@ test('publishing refreshes message data without rescanning subscription lifecycl
   await page.getByRole('button', { name: 'receive', exact: true }).click()
   await page.getByRole('button', { name: 'receive next (peek-lock)', exact: true }).click()
   await expect.poll(() => receives).toBe(1)
+  await expect(page.getByRole('button', { name: 'abandon — retry / DLQ at limit', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'complete', exact: true }).click()
   await expect(page.getByText('completed seq 1', { exact: false })).toBeVisible()
   expect(completes).toBe(1)

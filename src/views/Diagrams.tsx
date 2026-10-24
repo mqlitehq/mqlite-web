@@ -85,18 +85,39 @@ function Heading({ x, children }: { x: number; children: string }) {
   )
 }
 
-function Figure({ title, caption, viewBox, children }: { title: string; caption: ReactNode; viewBox: string; children: ReactNode }) {
+function Figure({
+  title,
+  caption,
+  viewBox,
+  minWidth,
+  children,
+}: {
+  title: string
+  caption: ReactNode
+  viewBox: string
+  minWidth: number
+  children: ReactNode
+}) {
   return (
     <Card className="p-5">
       <h3 className="mb-3 text-sm font-semibold">{title}</h3>
-      <svg viewBox={viewBox} className="w-full" style={{ fontFamily: 'var(--font-mono)' }} role="img" aria-label={title}>
-        <defs>
-          <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--color-faint)" />
-          </marker>
-        </defs>
-        {children}
-      </svg>
+      <p className="mb-2 text-[10px] text-faint sm:hidden">diagram · scroll horizontally →</p>
+      <div className="overflow-x-auto" aria-label={`${title} diagram viewport`}>
+        <svg
+          viewBox={viewBox}
+          className="block w-full"
+          style={{ fontFamily: 'var(--font-mono)', minWidth }}
+          role="img"
+          aria-label={title}
+        >
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--color-faint)" />
+            </marker>
+          </defs>
+          {children}
+        </svg>
+      </div>
       <div className="mt-3 space-y-1.5 text-xs leading-relaxed text-muted-foreground">{caption}</div>
     </Card>
   )
@@ -109,6 +130,7 @@ export function Diagrams() {
       <Figure
         title="Two delivery targets — queue vs. topic fan-out"
         viewBox="0 0 900 380"
+        minWidth={800}
         caption={
           <>
             <p>
@@ -120,6 +142,11 @@ export function Diagrams() {
             <p>
               <span className="text-danger">✗ matches no subscription → the message is dropped</span> (no copy is
               stored). Each subscription is its own independent queue, with its own DLQ.
+            </p>
+            <p>
+              A handler error normally ends in <strong className="text-foreground">Abandon</strong> and a retry. A
+              message reaches the DLQ through explicit Reject, failure of its final ordinary delivery attempt, or
+              TTL expiry when dead-letter-on-expire is enabled—not on every handler error.
             </p>
           </>
         }
@@ -136,11 +163,11 @@ export function Diagrams() {
         <Arrow x1={125} y1={162} x2={125} y2={176} label="claim" />
         <Box x={45} y={178} w={160} h={30} lines={['locked (in-flight)']} tone="warn" />
         {/* normal path: the consumer receives + completes, and the message leaves the queue */}
-        <Arrow x1={125} y1={232} x2={125} y2={262} label="receive + complete" />
+        <Arrow x1={125} y1={232} x2={125} y2={262} label="Receive → Complete" />
         <Box x={40} y={264} w={170} h={32} lines={['consumer']} />
-        {/* exceptional path: only on failure → DLQ, a sink that closes back via redrive / purge */}
+        {/* exceptional DLQ cases form a side-loop that closes through redrive or purge */}
         <line x1={205} y1={188} x2={270} y2={182} stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
-        <text x={237} y={172} textAnchor="middle" fontSize={10} fill="var(--color-faint)">on failure</text>
+        <text x={264} y={172} textAnchor="end" fontSize={10} fill="var(--color-faint)">DLQ cases</text>
         <Box x={270} y={160} w={152} h={36} lines={['dead-letter (DLQ)']} tone="danger" />
         <path d="M 346 160 L 346 140 L 205 140" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} strokeDasharray="4 3" markerEnd="url(#arr)" />
         <text x={276} y={132} textAnchor="middle" fontSize={10} fill="var(--color-faint)">redrive ↺ (to active)</text>
@@ -179,34 +206,51 @@ export function Diagrams() {
       <Figure
         title="A message's life — states & settlement"
         viewBox="0 0 720 285"
+        minWidth={720}
         caption={
           <>
             <p>
-              <strong className="text-foreground">receive</strong> locks an eligible active message and increments its
-              delivery count; you then settle it. Ordering can hold successors behind an earlier message.
-              <strong className="text-foreground"> Renew</strong> extends the current lease without changing state.
+              <strong className="text-foreground">Receive</strong> claims an eligible active message, changes it to
+              locked, and increments <code>delivery_count</code>. Ordering can hold successors behind an earlier
+              message. <strong className="text-foreground">Renew</strong> only extends that same claim's lock lease: it
+              does not change state, issue a new delivery, or increment the count.
             </p>
             <p>
-              Below the delivery limit, immediate <strong className="text-foreground">abandon</strong> or automatic{' '}
-              <strong className="text-foreground">lock expiry</strong> returns the message to active. Abandon with a
-              positive delay parks it in <strong className="text-foreground">scheduled</strong> until due, holding
-              its group (or the whole strict-FIFO queue). Abandon or lock expiry at{' '}
-              <strong className="text-foreground">delivery_count ≥ max</strong> goes to DLQ instead, as does an
-              explicit <strong className="text-foreground">reject</strong>. The count increments on the next claim,
-              not when requeued.
+              With <code>max_delivery_count=10</code>, ordinary Receive number 10 is a complete final attempt: it can
+              be Renewed repeatedly before its lease expires and while its subscription remains alive, and it can still
+              be Completed successfully. If that attempt is Abandoned, its lock expires, or restart recovery finds it
+              locked, it goes to the DLQ instead of returning for ordinary Receive number 11.
             </p>
             <p>
-              <strong className="text-foreground">TTL</strong> expiry applies to active, locked, scheduled and
-              deferred messages: DLQ when dead-letter-on-expire is enabled, otherwise removal.
-              <strong className="text-foreground"> Cancel</strong> removes only a never-delivered scheduled message
-              before activation; it cannot cancel a backoff retry.
+              <strong className="text-foreground">Complete</strong> removes a successful delivery.{' '}
+              <strong className="text-foreground">Abandon</strong> ends the current attempt and makes it retryable now,
+              or after a positive delay; at the ordinary retry limit it dead-letters instead. Delayed Abandon reuses the{' '}
+              <strong className="text-foreground">scheduled</strong> state as retry backoff, while a newly sent message
+              can use that state for its initial delivery time. While waiting, it holds its ordered group—or the whole
+              strict-FIFO queue. Neither Abandon nor activation increments the count; the next claim does.{' '}
+              <strong className="text-foreground">Cancel</strong> applies only to a never-delivered scheduled send, not
+              a backoff retry.
             </p>
             <p>
-              <strong className="text-foreground">ReceiveDeferred</strong> claims an unexpired deferred message by
-              seq and increments its delivery count. <strong className="text-foreground">Redrive</strong> returns a
-              DLQ message to active with the count reset; purge / retention removes it. Settlement is fenced by the
-              lock token. Within receipt retention, a successful retry must repeat the exact queue, seq, token,
-              operation and effect-changing arguments.
+              <strong className="text-foreground">Defer</strong> parks the message for explicit retrieval;{' '}
+              <strong className="text-foreground">ReceiveDeferred</strong> claims it by sequence number and increments
+              the count. That explicit deferred-claim path does not enforce <code>max_delivery_count</code>, so
+              the setting is a failure/retry threshold rather than an absolute cap across every possible claim.{' '}
+              <strong className="text-foreground">Reject</strong> dead-letters immediately.{' '}
+              <strong className="text-foreground">Redrive</strong> returns a DLQ message to active with its count reset;
+              purge or retention removes it.
+            </p>
+            <p>
+              Keep three clocks separate. The <strong className="text-foreground">lock lease</strong> fences who may
+              settle one claim; Renew refreshes it before expiry rather than stacking durations, and cannot revive an
+              expired lease. A{' '}
+              <strong className="text-foreground">message TTL</strong> can independently expire an active, locked,
+              scheduled, or deferred message, sending it to the DLQ when dead-letter-on-expire is enabled and removing
+              it otherwise. A{' '}
+              <strong className="text-foreground">subscription lifetime</strong> is the fixed deadline for the entire
+              subscription and caps its leases. Settlement is fenced by the lock token, and handlers must remain
+              idempotent because work can outlive a lost lease. Within receipt retention, retry a successful settlement
+              only with the exact same queue, sequence number, token, operation, and effect-changing arguments.
             </p>
           </>
         }
@@ -216,9 +260,13 @@ export function Diagrams() {
         <text x={163} y={79} textAnchor="middle" fontSize={10} fill="var(--color-faint)">due</text>
         <Box x={185} y={70} w={120} h={36} lines={['active']} tone="ok" />
         <Arrow x1={307} y1={88} x2={360} y2={88} />
-        <text x={333} y={55} textAnchor="middle" fontSize={10} fill="var(--color-faint)">receive</text>
+        <text x={333} y={55} textAnchor="middle" fontSize={10} fill="var(--color-faint)">Receive / claim</text>
         <text x={333} y={68} textAnchor="middle" fontSize={10} fill="var(--color-faint)">(count++)</text>
         <Box x={360} y={70} w={120} h={36} lines={['locked']} tone="warn" />
+
+        {/* renew extends the same locked delivery; it is not another claim */}
+        <path d="M 400 106 C 400 136 456 136 456 106" fill="none" stroke="var(--color-faint)" strokeWidth={1.5} markerEnd="url(#arr)" />
+        <text x={428} y={145} textAnchor="middle" fontSize={9} fill="var(--color-faint)">Renew ↺ · count unchanged</text>
 
         {/* settlement branches from locked */}
         <Arrow x1={480} y1={78} x2={545} y2={46} />
@@ -229,7 +277,7 @@ export function Diagrams() {
         <text x={513} y={82} textAnchor="middle" fontSize={10} fill="var(--color-faint)">defer ⇄</text>
         <Box x={545} y={88} w={150} h={32} lines={['deferred']} tone="info" />
         <Arrow x1={486} y1={106} x2={545} y2={160} />
-        <text x={620} y={135} textAnchor="middle" fontSize={10} fill="var(--color-faint)">reject / count ≥ max</text>
+        <text x={620} y={135} textAnchor="middle" fontSize={10} fill="var(--color-faint)">reject / fail at limit</text>
         <Box x={545} y={146} w={150} h={32} lines={['dead-letter (DLQ)']} tone="danger" />
 
         {/* delayed abandon: below the delivery limit, park in scheduled until due */}
