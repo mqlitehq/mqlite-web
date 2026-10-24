@@ -90,8 +90,14 @@ export function Receiver({
             <Button size="sm" disabled={busy} onClick={() => settle('completed', () => complete(queue, m.seq_number!, m.lock_token!))}>
               complete
             </Button>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => settle('abandoned', () => abandon(queue, m.seq_number!, m.lock_token!))}>
-              abandon — redeliver
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              title="End this attempt; retry now, or dead-letter at the ordinary delivery limit"
+              onClick={() => settle('abandoned', () => abandon(queue, m.seq_number!, m.lock_token!))}
+            >
+              abandon — retry / DLQ at limit
             </Button>
             <Button variant="outline" size="sm" disabled={busy} onClick={() => settle('deferred', () => defer(queue, m.seq_number!, m.lock_token!))}>
               defer
