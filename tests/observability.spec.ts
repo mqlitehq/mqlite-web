@@ -362,6 +362,52 @@ test('broker target labels follow browser origins without exposing endpoint secr
   })
 })
 
+test('broker connection stays compact and reveals details on hover and keyboard focus', async ({
+  page,
+}) => {
+  await setup(page)
+  await page.setViewportSize({ width: 1200, height: 800 })
+  await page.goto('/')
+
+  const connection = page.getByLabel('broker connection: remote https://observe.example.test')
+  const tooltip = page.getByRole('tooltip')
+  const header = page.locator('#root > div > header')
+  await expect(connection).toBeVisible()
+  await expect(connection).toContainText('remote')
+  await expect(tooltip).toBeHidden()
+
+  const connectionBox = await connection.boundingBox()
+  const headerBox = await header.boundingBox()
+  expect(connectionBox!.width).toBeLessThan(120)
+  expect(headerBox!.height).toBeLessThanOrEqual(64)
+
+  await connection.hover()
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip).toContainText('https://observe.example.test')
+  await expect(tooltip).toContainText('mqlite 0.3.2 · sample available')
+
+  await page.mouse.move(0, 799)
+  await connection.evaluate((element) => element.blur())
+  await expect(tooltip).toBeHidden()
+  await connection.focus()
+  await expect(tooltip).toBeVisible()
+
+  await connection.evaluate((element) => element.blur())
+  await page.mouse.move(0, 799)
+  await expect(tooltip).toBeHidden()
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const label of ['rel', 'local', 'UTC']) {
+    const timeButton = page.getByRole('button', { name: label, exact: true })
+    await expect(timeButton).toBeVisible()
+    await expect(timeButton).toBeEnabled()
+  }
+  await expect(page.getByRole('button', { name: 'sign out', exact: false })).toBeVisible()
+  await expect(page.locator('nav').getByRole('button', { name: 'overview', exact: true })).toBeVisible()
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+  ).toBe(true)
+})
+
 test('message lifecycle help distinguishes claims, renewals, retry backoff, and expiry clocks', async ({
   page,
 }) => {
@@ -463,7 +509,6 @@ test('canonical queue, anomaly and process measurements share one request and al
   const connection = page.getByLabel('broker connection: remote https://observe.example.test')
   await expect(connection).toBeVisible()
   await expect(connection).toContainText('remote')
-  await expect(connection).toContainText('https://observe.example.test')
   await expect(system).toContainText('broker time: 0s ago')
   await expect(system).toContainText('queue sample: 1s ago')
   await expect(page.getByLabel('process observations')).toContainText('Process counters since 6s ago')

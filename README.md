@@ -19,9 +19,11 @@ Cross-origin (console and broker on different origins) needs the broker to allow
 run it with `MQLITE_CORS` set (the `mqlite serve` binary defaults to `*`, which is safe
 because every RPC still requires a Bearer token).
 
-After login, the header labels the active broker connection as `same-origin` or
-`remote`. Remote connections show only the broker origin (scheme, host and port);
-URL credentials, paths, query parameters and fragments are never rendered.
+After login, the header keeps a compact `same-origin`, `remote`, or `custom`
+connection badge visible. Hover it or focus it from the keyboard to see the broker
+origin, identity/version, and observation availability. Remote details contain only
+the broker origin (scheme, host and port); URL credentials, paths, query parameters
+and fragments are never rendered.
 
 ## Develop
 

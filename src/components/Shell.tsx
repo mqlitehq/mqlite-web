@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { discovery } from '../lib/api.js'
 import type { Discovery } from '../lib/types.js'
 import { useObservation } from '../lib/observation-context.js'
 import { cn } from '../lib/cn.js'
-import { currentBrokerTarget } from '../lib/broker-target.js'
+import { currentBrokerTarget, type BrokerTarget } from '../lib/broker-target.js'
 import { Logo } from './Logo.js'
 import { TimeFormatToggle } from './Time.js'
 import { Badge } from './ui.js'
@@ -43,7 +43,11 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
   const [detail, setDetail] = useState<DetailTarget | null>(null)
   const [info, setInfo] = useState<Discovery | null>(null)
   const brokerTarget = currentBrokerTarget()
-  const connectionLabel = `broker connection: ${brokerTarget.kind} ${brokerTarget.display}`
+  const connectionAvailability = current
+    ? healthy
+      ? 'sample available'
+      : 'partial observation'
+    : 'availability unknown'
 
   useEffect(() => {
     discovery().then(setInfo)
@@ -68,36 +72,27 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 min-h-14 border-b border-border bg-surface-header/95 backdrop-blur">
-        <div className="mx-auto flex h-full min-h-14 max-w-6xl flex-wrap items-center gap-x-7 gap-y-2 px-6 py-2">
+        <div className="mx-auto flex h-full min-h-14 max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-6 py-2 xl:gap-x-7">
           <Logo />
-          <nav className="flex h-10 items-stretch gap-4 overflow-x-auto">
+          <nav className="flex h-10 min-w-0 items-stretch gap-3 overflow-x-auto lg:gap-4">
             {NAV.filter((n) => canManage || n.id === 'overview' || n.id === 'metrics').map((n) => (
               <NavItem key={n.id} active={view === n.id} onClick={() => go(n.id)}>
                 {n.label}
               </NavItem>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2 sm:gap-4">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <TimeFormatToggle />
-            <div
-              className="flex items-center gap-1.5 text-xs text-muted-foreground"
-              aria-label={connectionLabel}
-              title={`${connectionLabel} · ${current ? (healthy ? 'sample available' : 'partial observation') : 'availability unknown'}`}
+            <BrokerConnection
+              target={brokerTarget}
+              info={info}
+              healthy={Boolean(healthy)}
+              availability={connectionAvailability}
+            />
+            <button
+              onClick={onSignOut}
+              className="shrink-0 whitespace-nowrap text-xs text-muted-foreground transition-colors hover:text-danger"
             >
-              <span className={`inline-block h-1.5 w-1.5 rounded-full ${healthy ? 'bg-ok' : 'bg-warn'}`} />
-              <Badge
-                tone={brokerTarget.kind === 'remote' ? 'info' : brokerTarget.kind === 'custom' ? 'warn' : 'neutral'}
-                className="h-4 px-1.5 text-[10px]"
-              >
-                {brokerTarget.kind}
-              </Badge>
-              <span className="hidden max-w-48 truncate text-faint lg:inline">{brokerTarget.display}</span>
-              <span className="hidden text-faint sm:inline">
-                {info?.name ?? 'broker'}
-                {info?.version ? ` ${info.version}` : ''}
-              </span>
-            </div>
-            <button onClick={onSignOut} className="text-xs text-muted-foreground transition-colors hover:text-danger">
               sign out →
             </button>
           </div>
@@ -125,6 +120,57 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           <Docs onOpenKeys={() => go('keys')} />
         )}
       </main>
+    </div>
+  )
+}
+
+function BrokerConnection({
+  target,
+  info,
+  healthy,
+  availability,
+}: {
+  target: BrokerTarget
+  info: Discovery | null
+  healthy: boolean
+  availability: string
+}) {
+  const tooltipId = useId()
+  const connectionLabel = `broker connection: ${target.kind} ${target.display}`
+  const brokerIdentity = `${info?.name ?? 'broker'}${info?.version ? ` ${info.version}` : ''}`
+
+  return (
+    <div className="group relative shrink-0">
+      <button
+        type="button"
+        aria-label={connectionLabel}
+        aria-describedby={tooltipId}
+        className="flex h-7 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span
+          aria-hidden="true"
+          className={`inline-block h-1.5 w-1.5 rounded-full ${healthy ? 'bg-ok' : 'bg-warn'}`}
+        />
+        <Badge
+          tone={target.kind === 'remote' ? 'info' : target.kind === 'custom' ? 'warn' : 'neutral'}
+          className="h-4 px-1.5 text-[10px]"
+        >
+          {target.kind}
+        </Badge>
+      </button>
+      <div
+        id={tooltipId}
+        role="tooltip"
+        className="pointer-events-none invisible absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg bg-surface p-3 text-left opacity-0 ring-1 ring-border-strong transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+      >
+        <span className="block text-[10px] font-medium uppercase tracking-wide text-faint">
+          broker connection
+        </span>
+        <span className="mt-1 block break-all text-xs text-foreground">{target.display}</span>
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          {brokerIdentity} · {availability}
+        </span>
+      </div>
     </div>
   )
 }
