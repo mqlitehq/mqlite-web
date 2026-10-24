@@ -379,6 +379,8 @@ test('message lifecycle help distinguishes claims, renewals, retry backoff, and 
   await expect(lifecycle).toContainText('does not enforce max_delivery_count')
   await expect(lifecycle).toContainText('lock lease')
   await expect(lifecycle).toContainText('message TTL')
+  await expect(lifecycle).toContainText('queue default is both its default and its ceiling')
+  await expect(lifecycle).toContainText('waiting for an initial schedule does not consume it')
   await expect(lifecycle).toContainText('subscription lifetime')
 
   const viewport = page.getByLabel("A message's life — states & settlement diagram viewport")
