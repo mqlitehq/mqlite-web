@@ -245,8 +245,10 @@ export function Diagrams() {
               settle one claim; Renew refreshes it before expiry rather than stacking durations, and cannot revive an
               expired lease. A{' '}
               <strong className="text-foreground">message TTL</strong> can independently expire an active, locked,
-              scheduled, or deferred message, sending it to the DLQ when dead-letter-on-expire is enabled and removing
-              it otherwise. A{' '}
+              scheduled, or deferred message. A positive queue default is both its default and its ceiling. The
+              effective TTL starts at the message&apos;s initial visibility time, so waiting for an initial schedule does
+              not consume it, while delayed Abandon does not restart it. Expiry ends normal delivery: it sends the row
+              to the DLQ when dead-letter-on-expire is enabled and removes it otherwise. A{' '}
               <strong className="text-foreground">subscription lifetime</strong> is the fixed deadline for the entire
               subscription and caps its leases. Settlement is fenced by the lock token, and handlers must remain
               idempotent because work can outlive a lost lease. Within receipt retention, retry a successful settlement
