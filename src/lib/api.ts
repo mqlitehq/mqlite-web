@@ -375,14 +375,13 @@ export async function listSubscriptionsPage(
   }))
   const seen = new Set<string>()
   for (const subscription of subscriptions) {
-    const key = `${subscription.topic}\0${subscription.name}`
     if (
-      seen.has(key) ||
+      seen.has(subscription.name) ||
       (options.topic !== undefined && subscription.topic !== options.topic) ||
       !options.include_deleting && subscription.state === 'deleting'
     )
       throw new ApiError(502, 'invalid_response', 'Paged subscription inventory is unavailable.')
-    seen.add(key)
+    seen.add(subscription.name)
   }
   if (
     (r.next_after !== undefined && subscriptions.length !== limit) ||
@@ -395,6 +394,42 @@ export async function listSubscriptionsPage(
     subscriptions,
     total: r.total as number,
     ...(r.next_after ? { next_after: r.next_after as string } : {}),
+  }
+}
+
+// Read the lifecycle-aware administrative inventory in maximum-size pages. This is
+// used by initial and explicit topology loads, never by the five-second observation
+// poll or data-plane actions. Pages are separate snapshots, so concurrent roster
+// changes are reconciled by a later explicit refresh; duplicate rows or cursors are
+// invalid rather than a reason to loop forever.
+export async function listSubscriptionInventory(): Promise<SubscriptionPageItem[]> {
+  const subscriptions: SubscriptionPageItem[] = []
+  const seenSubscriptions = new Set<string>()
+  const seenCursors = new Set<string>()
+  let scanBudget: number | undefined
+  let after: string | undefined
+  for (;;) {
+    const page = await listSubscriptionsPage({
+      ...(after ? { after } : {}),
+      limit: 1000,
+      include_deleting: true,
+    })
+    scanBudget ??= page.total
+    if (page.subscriptions.length > scanBudget - subscriptions.length)
+      throw new ApiError(502, 'invalid_response', 'Paged subscription inventory exceeded its initial scan budget.')
+    for (const subscription of page.subscriptions) {
+      if (seenSubscriptions.has(subscription.name))
+        throw new ApiError(502, 'invalid_response', 'Paged subscription inventory repeated an entry.')
+      seenSubscriptions.add(subscription.name)
+      subscriptions.push(subscription)
+    }
+    if (!page.next_after) return subscriptions
+    if (subscriptions.length >= scanBudget)
+      throw new ApiError(502, 'invalid_response', 'Paged subscription inventory exceeded its initial scan budget.')
+    if (seenCursors.has(page.next_after))
+      throw new ApiError(502, 'invalid_response', 'Paged subscription inventory repeated a cursor.')
+    seenCursors.add(page.next_after)
+    after = page.next_after
   }
 }
 
