@@ -145,7 +145,7 @@ export function Diagrams() {
             </p>
             <p>
               A handler error normally ends in <strong className="text-foreground">Abandon</strong> and a retry. A
-              message reaches the DLQ through explicit Reject, failure of its final ordinary delivery attempt, or
+              message reaches the DLQ through explicit Reject, failure of its final ordinary Peek-Lock attempt, or
               TTL expiry when dead-letter-on-expire is enabled—not on every handler error.
             </p>
           </>
@@ -216,10 +216,10 @@ export function Diagrams() {
               does not change state, issue a new delivery, or increment the count.
             </p>
             <p>
-              With <code>max_delivery_count=10</code>, ordinary Receive number 10 is a complete final attempt: it can
+              With <code>max_delivery_count=10</code>, ordinary Peek-Lock Receive number 10 is a complete final attempt: it can
               be Renewed repeatedly before its lease expires and while its subscription remains alive, and it can still
               be Completed successfully. If that attempt is Abandoned, its lock expires, or restart recovery finds it
-              locked, it goes to the DLQ instead of returning for ordinary Receive number 11.
+              locked, it goes to the DLQ instead of returning for ordinary Peek-Lock Receive number 11.
             </p>
             <p>
               <strong className="text-foreground">Complete</strong> removes a successful delivery.{' '}
