@@ -4,7 +4,8 @@
 // embed and serve this console at /ui/); the dev server proxies the RPC paths.
 
 import { isObservation, type Observation } from './observation.js'
-import { getToken, clearToken, setToken, getEndpoint } from './auth.js'
+import { getToken, clearToken, setToken } from './auth.js'
+import { brokerBaseURL } from './broker-target.js'
 import { isDisplayableEpochMs } from './date-time.js'
 import type {
   AccessKey,
@@ -29,7 +30,7 @@ import type {
 // Target broker base URL: the stored endpoint (standalone connector → any broker), else a
 // build-time default, else '' = same origin (embedded: the broker serves us at /ui/).
 function base(): string {
-  return getEndpoint() || (import.meta.env.VITE_MQLITE_URL as string | undefined) || ''
+  return brokerBaseURL()
 }
 
 export class ApiError extends Error {
