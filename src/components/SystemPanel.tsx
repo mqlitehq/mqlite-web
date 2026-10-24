@@ -1,11 +1,20 @@
 import { useObservation } from '../lib/observation-context.js'
-import { fmtBytes, fmtMs, fmtTime } from '../lib/format.js'
+import { fmtBytes, fmtMs, fmtTime, fmtUTC } from '../lib/format.js'
 import { Badge, Card, Dot } from './ui.js'
 
 export function SystemPanel() {
   const { observation: s, current, complete, legacy, canManage, err } = useObservation()
   const runtimeAvailable = !s || (s.runtime.read_available && (s.backend !== 'local' || s.runtime.db_size_available))
   const state = !current ? 'unknown' : complete && runtimeAvailable ? 'available' : 'partial'
+  const serverTime = s?.server_time_ms
+  const sampleDelta = serverTime && s ? serverTime - s.sampled_at_ms : undefined
+  const sampleAge =
+    sampleDelta === undefined
+      ? ''
+      : sampleDelta < 0
+        ? ` · ${fmtMs(-sampleDelta)} ahead of broker clock`
+        : ` · ${sampleDelta === 0 ? '0s' : fmtMs(sampleDelta)} old`
+  const uptimeAt = serverTime ?? s?.sampled_at_ms
   return (
     <Card className="p-4" aria-label="observation status">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -19,13 +28,18 @@ export function SystemPanel() {
           {s ? `mqlite ${s.version} · schema ${s.runtime.schema_version}` : ''}
         </span>
       </div>
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          sampled: {s ? fmtTime(s.sampled_at_ms) : 'unknown'}
+          broker time (UTC): {serverTime ? fmtUTC(serverTime) : 'unavailable'}
+          {!current && serverTime ? ' · stale' : ''}
+        </div>
+        <div>
+          queue sample: {s ? fmtTime(s.sampled_at_ms) : 'unknown'}
+          {sampleAge}
           {!current && s ? ' · stale' : ''}
         </div>
         <div>last collection success: {s ? fmtTime(s.collection.last_success_at_ms) : 'unknown'}</div>
-        <div>process uptime: {s ? fmtMs(s.sampled_at_ms - s.started_at_ms) : 'unknown'}</div>
+        <div>process uptime: {s && uptimeAt ? fmtMs(uptimeAt - s.started_at_ms) : 'unknown'}</div>
       </div>
       {s && (
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">

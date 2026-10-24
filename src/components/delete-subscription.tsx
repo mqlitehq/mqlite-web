@@ -2,33 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ApiError,
   deleteSubscription,
-  listSubscriptionsPage,
+  findSubscription,
   observeUnsupported,
 } from '../lib/api.js'
-import type { Subscription } from '../lib/types.js'
 import { Button, ErrorBanner, Input } from './ui.js'
 
 type DeleteMode = 'ready' | 'pending' | 'reconcile'
-
-async function findSubscription(topic: string, name: string): Promise<Subscription | undefined> {
-  let after: string | undefined
-  const seen = new Set<string>()
-  for (;;) {
-    const page = await listSubscriptionsPage({
-      topic,
-      ...(after ? { after } : {}),
-      limit: 1000,
-      include_deleting: true,
-    })
-    const exact = page.subscriptions.find((sub) => sub.topic === topic && sub.name === name)
-    if (exact) return exact
-    if (!page.next_after) return undefined
-    if (seen.has(page.next_after))
-      throw new ApiError(502, 'invalid_response', 'Paged subscription inventory repeated a cursor.')
-    seen.add(page.next_after)
-    after = page.next_after
-  }
-}
 
 export function DeleteSubscription({
   topic,

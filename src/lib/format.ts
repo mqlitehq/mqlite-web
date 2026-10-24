@@ -1,4 +1,4 @@
-import { formatDateTime } from './date-time.js'
+import { formatDateTime, isDisplayableEpochMs } from './date-time.js'
 
 export function fmtNum(n: number): string {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
@@ -34,6 +34,11 @@ export function fmtTime(ms?: number): string {
   const date = new Date(ms)
   const formatted = formatDateTime(date)
   return formatted ? `${formatted}:${String(date.getSeconds()).padStart(2, '0')}` : '—'
+}
+
+export function fmtUTC(ms?: number): string {
+  if (ms === undefined || !isDisplayableEpochMs(ms)) return '—'
+  return new Date(ms).toISOString()
 }
 
 export function fmtMs(ms?: number): string {

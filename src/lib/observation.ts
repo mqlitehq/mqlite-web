@@ -1,4 +1,5 @@
 import type { Metrics } from './types.js'
+import { isDisplayableEpochMs } from './date-time.js'
 
 export interface Histogram {
   bounds_seconds: number[]
@@ -27,6 +28,9 @@ export interface MaintenanceDiagnostics {
 }
 export interface Observation {
   sampled_at_ms: number
+  // Current broker wall clock for this response. Older brokers omit it; zero is unavailable.
+  // Unlike sampled_at_ms, this value must not come from the queue snapshot cache.
+  server_time_ms?: number
   started_at_ms: number
   backend: string
   version: string
@@ -294,6 +298,9 @@ export function isObservation(value: unknown): value is Observation {
       ['sampled_at_ms', 'started_at_ms', 'queue_count', 'subscription_count'],
     ) ||
     !value.version ||
+    ('server_time_ms' in value &&
+      value.server_time_ms !== 0 &&
+      !isDisplayableEpochMs(value.server_time_ms, false)) ||
     !['memory', 'local', 'remote'].includes(value.backend as string) ||
     !['manage', 'monitor', 'anonymous', 'embedded'].includes(value.access as string) ||
     !fields(value.collection, ['state', 'error_code'], ['last_success_at_ms', 'duration_seconds']) ||

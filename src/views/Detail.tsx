@@ -1,8 +1,18 @@
 import { useTopology } from '../lib/useTopology.js'
-import { Fragment, useCallback, useEffect, useState } from 'react'
-import { bodySize, cancel, decodeBody, listSubscriptions, peek, subscribe } from '../lib/api.js'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  ApiError,
+  bodySize,
+  cancel,
+  decodeBody,
+  findSubscription,
+  listSubscriptions,
+  observeUnsupported,
+  peek,
+  subscribe,
+} from '../lib/api.js'
 import type { DetailTarget } from '../components/Shell.js'
-import type { MessageState, WireMessage } from '../lib/types.js'
+import type { MessageState, SubscriptionPageItem, WireMessage } from '../lib/types.js'
 import {
   Badge,
   Button,
@@ -24,7 +34,7 @@ import { DLQActions } from '../components/DLQActions.js'
 import { DeferredSettle } from '../components/DeferredSettle.js'
 import { MessageDetail } from '../components/MessageDetail.js'
 import { Time } from '../components/Time.js'
-import { fmtBytes } from '../lib/format.js'
+import { fmtBytes, fmtMs, fmtUTC } from '../lib/format.js'
 
 const TABS: { key: MessageState; label: string }[] = [
   { key: 'active', label: 'active' },
@@ -32,6 +42,15 @@ const TABS: { key: MessageState; label: string }[] = [
   { key: 'deferred', label: 'deferred' },
   { key: 'dead_lettered', label: 'dead-letter' },
 ]
+
+type SubscriptionLookup = 'loading' | 'found' | 'missing' | 'legacy' | 'error'
+
+export function subscriptionRemaining(expiresAtMs: number, serverTimeMs?: number): string {
+  if (expiresAtMs === 0) return 'permanent'
+  if (!serverTimeMs) return 'unavailable — broker time not reported'
+  const remaining = expiresAtMs - serverTimeMs
+  return remaining <= 0 ? 'expired' : fmtMs(remaining)
+}
 
 export function Detail({
   target,
@@ -44,15 +63,45 @@ export function Detail({
   const { name, kind, topic } = target
   const isSub = kind === 'subscription'
 
-  const { queues, subscriptions, metrics, reload: loadStats, err: observationError } = useTopology()
+  const {
+    observation,
+    queues,
+    subscriptions,
+    metrics,
+    current: observationCurrent,
+    reload: loadStats,
+    err: observationError,
+  } = useTopology()
   const m = metrics[name]
   const queueState = isSub ? undefined : queues.find((queue) => queue.name === name)?.state
-  const subscriptionState = isSub
-    ? subscriptions.find((subscription) => subscription.topic === topic && subscription.name === name)?.state
+  const topologySubscription = isSub
+    ? subscriptions.find((subscription) => subscription.topic === topic && subscription.name === name)
     : undefined
+  const topologySubscriptionState = topologySubscription?.state
+  const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionPageItem | null>(null)
+  const [subscriptionLookup, setSubscriptionLookup] = useState<SubscriptionLookup>('loading')
+  const [subscriptionError, setSubscriptionError] = useState('')
+  const [savedExpr, setSavedExpr] = useState<string | null>(null)
+  const subscriptionRequest = useRef(0)
+  const subscriptionState =
+    subscriptionLookup === 'found' ? subscriptionInfo?.state : topologySubscriptionState
   const lifecycleState = isSub ? subscriptionState : queueState
   const [deletionAccepted, setDeletionAccepted] = useState(lifecycleState === 'deleting')
-  const deleting = lifecycleState === 'deleting' || deletionAccepted
+  const subscriptionLoading = isSub && subscriptionLookup === 'loading'
+  const subscriptionAbsent = isSub && subscriptionLookup === 'missing'
+  // A completed lifecycle scan is authoritative for absence even if the cheaper
+  // topology view still says deleting. Render exactly one state while it catches up.
+  const deleting = !subscriptionAbsent && (lifecycleState === 'deleting' || deletionAccepted)
+  const subscriptionMissing = subscriptionAbsent
+  const brokerTime = observation?.server_time_ms || undefined
+  const subscriptionExpired =
+    isSub &&
+    !deleting &&
+    subscriptionLookup === 'found' &&
+    !!subscriptionInfo?.expires_at_ms &&
+    brokerTime !== undefined &&
+    brokerTime >= subscriptionInfo.expires_at_ms
+  const blocked = deleting || subscriptionLoading || subscriptionMissing || subscriptionExpired
   const [expr, setExpr] = useState<string | null>(null) // subscription filter (null until loaded)
   const [tab, setTab] = useState<MessageState>('active')
   const [msgs, setMsgs] = useState<WireMessage[] | null>(null)
@@ -64,15 +113,55 @@ export function Detail({
   const [showRecv, setShowRecv] = useState(false) // receive & settle
   const [editFilter, setEditFilter] = useState(false)
 
-  const loadExpr = useCallback(() => {
-    if (!isSub) return
-    listSubscriptions()
-      .then((subs) => setExpr(subs.find((s) => s.topic === topic && s.name === name)?.expr ?? ''))
-      .catch(() => setExpr(''))
+  const loadSubscription = useCallback(async () => {
+    if (!isSub || !topic) return
+    const request = ++subscriptionRequest.current
+    const superseded = () => request !== subscriptionRequest.current
+    setSubscriptionLookup('loading')
+    setSubscriptionError('')
+    try {
+      const current = await findSubscription(topic, name)
+      if (superseded()) return
+      if (!current) {
+        setDeletionAccepted(false)
+        setSubscriptionInfo(null)
+        setExpr('')
+        setSavedExpr('')
+        setSubscriptionLookup('missing')
+        return
+      }
+      setSubscriptionInfo(current)
+      setExpr(current.expr)
+      setSavedExpr(current.expr)
+      setSubscriptionLookup('found')
+    } catch (cause) {
+      if (superseded()) return
+      if (cause instanceof ApiError && observeUnsupported(cause)) {
+        try {
+          const legacy = await listSubscriptions()
+          if (superseded()) return
+          const legacyExpr =
+            legacy.find((subscription) => subscription.topic === topic && subscription.name === name)?.expr ?? ''
+          setExpr(legacyExpr)
+          setSavedExpr(legacyExpr)
+          setSubscriptionInfo(null)
+          setSubscriptionLookup('legacy')
+          return
+        } catch {
+          // Report the lifecycle lookup failure below; legacy metadata is not authoritative.
+        }
+      }
+      if (superseded()) return
+      setSubscriptionInfo(null)
+      setExpr('')
+      setSavedExpr('')
+      setSubscriptionLookup('error')
+      setSubscriptionError(cause instanceof Error ? cause.message : 'Subscription lifecycle is unavailable.')
+    }
   }, [isSub, name, topic])
 
   const loadMsgs = useCallback(async () => {
-    if (deleting) {
+    if (blocked) {
       setMsgs([])
       setErr('')
       return
@@ -84,21 +173,43 @@ export function Detail({
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'peek failed')
     }
-  }, [deleting, name, tab])
+  }, [blocked, name, tab])
 
   useEffect(() => {
-    loadExpr()
-  }, [loadExpr])
+    void loadSubscription()
+    return () => {
+      // Invalidate an in-flight lookup when the target changes or this detail view
+      // unmounts. A later same-name view must never receive its stale result.
+      subscriptionRequest.current++
+    }
+  }, [loadSubscription])
   useEffect(() => {
     if (lifecycleState === 'deleting') setDeletionAccepted(true)
   }, [lifecycleState])
   useEffect(() => {
+    if (blocked && editFilter) {
+      setEditFilter(false)
+      setExpr(savedExpr ?? '')
+    }
+  }, [blocked, editFilter, savedExpr])
+  useEffect(() => {
     loadMsgs()
   }, [loadMsgs])
 
-  const refresh = () => {
+  const refreshData = () => {
     loadStats()
     loadMsgs()
+  }
+
+  const refresh = () => {
+    loadStats()
+    if (isSub) {
+      // Loading blocks the subscription data plane. Its transition back to found
+      // drives the single Peek through the loadMsgs effect, avoiding two racing reads.
+      void loadSubscription()
+    } else {
+      loadMsgs()
+    }
   }
 
   async function act(fn: () => Promise<string>) {
@@ -107,7 +218,7 @@ export function Detail({
     setErr('')
     try {
       setNote(await fn())
-      refresh()
+      refreshData()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'action failed')
     } finally {
@@ -116,13 +227,16 @@ export function Detail({
   }
 
   async function saveFilter(next: string) {
-    if (!topic) return
+    if (!topic || blocked) return
     setBusy(true)
     setErr('')
     setNote('')
     try {
       await subscribe(topic, name, next.trim() || undefined)
-      setExpr(next.trim())
+      const saved = next.trim()
+      setExpr(saved)
+      setSavedExpr(saved)
+      setSubscriptionInfo((current) => (current ? { ...current, expr: saved } : current))
       setEditFilter(false)
       setNote('filter updated')
     } catch (e) {
@@ -160,11 +274,14 @@ export function Detail({
               {name}
               {isSub && <Badge tone="info">subscription</Badge>}
               {deleting && <Badge tone="warn">deleting</Badge>}
+              {subscriptionExpired && <Badge tone="danger">expired</Badge>}
             </span>
           }
           subtitle={
             deleting ? (
               'cleanup in progress · name reserved'
+            ) : subscriptionExpired ? (
+              'expired at broker time · awaiting lifecycle cleanup'
             ) : m ? (
               <span>
                 {m.total} total
@@ -197,7 +314,7 @@ export function Detail({
                   }}
                 />
               )}
-              {isSub && topic && (
+              {isSub && topic && (deleting || !blocked) && (
                 <DeleteSubscription
                   topic={topic}
                   name={name}
@@ -217,7 +334,7 @@ export function Detail({
               <Button variant="outline" size="sm" onClick={refresh}>
                 refresh
               </Button>
-              {!deleting && (
+              {!blocked && (
                 <Button size="sm" onClick={() => setPanel((v) => !v)}>
                   {isSub ? '+ publish' : '+ send'}
                 </Button>
@@ -235,7 +352,74 @@ export function Detail({
         </Card>
       )}
 
-      {!deleting && (
+      {subscriptionMissing && (
+        <Card
+          role="status"
+          aria-live="polite"
+          className="mt-4 border border-warn/30 bg-warn/5 p-4 text-sm text-warn"
+        >
+          This subscription was not present in the latest lifecycle scan. It may have expired or been deleted;
+          refresh the inventory before acting on the same name.
+        </Card>
+      )}
+
+      {subscriptionExpired && (
+        <Card
+          role="status"
+          aria-live="polite"
+          className="mt-4 border border-warn/30 bg-warn/5 p-4 text-sm text-warn"
+        >
+          The broker clock has reached this subscription&apos;s fixed expiry. Subscription actions are blocked while
+          lifecycle cleanup catches up; refresh the inventory to confirm removal.
+        </Card>
+      )}
+
+      {isSub && !subscriptionAbsent && (
+        <Card className="mt-4 p-4" aria-label="subscription lifecycle">
+          <div className="text-xs font-medium uppercase tracking-wide text-faint">lifecycle</div>
+          {subscriptionLookup === 'loading' ? (
+            <p className="mt-2 text-xs text-faint">loading…</p>
+          ) : subscriptionLookup === 'found' && subscriptionInfo ? (
+            <dl className="mt-2 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+              <div>
+                <dt className="text-faint">created (UTC)</dt>
+                <dd className="mt-0.5 break-all tabular-nums text-foreground/80">
+                  <time dateTime={fmtUTC(subscriptionInfo.created_at_ms)}>
+                    {fmtUTC(subscriptionInfo.created_at_ms)}
+                  </time>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-faint">expires (UTC)</dt>
+                <dd className="mt-0.5 break-all tabular-nums text-foreground/80">
+                  {subscriptionInfo.expires_at_ms === 0 ? (
+                    'permanent · no expiry'
+                  ) : (
+                    <time dateTime={fmtUTC(subscriptionInfo.expires_at_ms)}>
+                      {fmtUTC(subscriptionInfo.expires_at_ms)}
+                    </time>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-faint">remaining at broker time</dt>
+                <dd className="mt-0.5 text-foreground/80">
+                  {subscriptionRemaining(subscriptionInfo.expires_at_ms, brokerTime)}
+                  {!observationCurrent && brokerTime ? ' · stale broker sample' : ''}
+                </dd>
+              </div>
+            </dl>
+          ) : subscriptionLookup === 'legacy' ? (
+            <p className="mt-2 text-xs text-faint">
+              This broker does not expose subscription lifecycle timestamps.
+            </p>
+          ) : (
+            <ErrorBanner message={subscriptionError || 'Subscription lifecycle is unavailable.'} />
+          )}
+        </Card>
+      )}
+
+      {!blocked && (
         <div className="mt-4">
           <StatStrip label="messages">
             <Stat label="active" v={m?.active} state="active" />
@@ -254,17 +438,17 @@ export function Detail({
       )}
 
       {/* subscription filter — the online editor lives here. */}
-      {isSub && (
+      {isSub && !subscriptionAbsent && (
         <Card className="mt-4 p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium uppercase tracking-wide text-faint">filter</span>
-            {!deleting && !editFilter && (
+            {!blocked && !editFilter && (
               <Button variant="ghost" size="sm" onClick={() => setEditFilter(true)}>
                 edit filter
               </Button>
             )}
           </div>
-          {editFilter ? (
+          {editFilter && !blocked ? (
             <div className="mt-3">
               <FilterEditor
                 expr={expr ?? ''}
@@ -279,7 +463,7 @@ export function Detail({
                   size="sm"
                   onClick={() => {
                     setEditFilter(false)
-                    loadExpr()
+                    setExpr(savedExpr ?? subscriptionInfo?.expr ?? topologySubscription?.expr ?? '')
                   }}
                 >
                   cancel
@@ -298,19 +482,19 @@ export function Detail({
         </Card>
       )}
 
-      {!deleting && panel &&
+      {!blocked && panel &&
         (isSub && topic ? (
           <Card className="mt-4 p-4">
             <div className="mb-3 text-sm font-medium">publish to {topic}</div>
-            <PublishPanel topic={topic} bordered={false} onPublished={refresh} />
+            <PublishPanel topic={topic} bordered={false} onPublished={refreshData} />
           </Card>
         ) : (
-          <SendPanel queue={name} onClose={() => setPanel(false)} onSent={refresh} />
+          <SendPanel queue={name} onClose={() => setPanel(false)} onSent={refreshData} />
         ))}
 
-      {!deleting && showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refresh} />}
+      {!blocked && showRecv && <Receiver queue={name} onClose={() => setShowRecv(false)} onChanged={refreshData} />}
 
-      {!deleting && (
+      {!blocked && (
         <div className="mt-5 flex flex-wrap items-center gap-1 border-b border-border">
           {TABS.map((t) => (
             <button
@@ -343,7 +527,7 @@ export function Detail({
         </div>
       )}
 
-      {!deleting && tab === 'dead_lettered' && <DLQActions queue={name} busy={busy} run={act} />}
+      {!blocked && tab === 'dead_lettered' && <DLQActions queue={name} busy={busy} run={act} />}
 
       {note && <p className="mt-3 text-xs text-ok">✓ {note}</p>}
       {err && (
@@ -352,7 +536,7 @@ export function Detail({
         </div>
       )}
 
-      {!deleting &&
+      {!blocked &&
         (!msgs ? (
           <Spinner label="peeking" />
         ) : msgs.length === 0 ? (
@@ -451,7 +635,7 @@ export function Detail({
                                 seq={msg.seq_number}
                                 onDone={() => {
                                   setOpenSeq(null)
-                                  refresh()
+                                  refreshData()
                                 }}
                               />
                             </div>
