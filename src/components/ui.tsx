@@ -1,5 +1,12 @@
 import { cva, type VariantProps } from 'class-variance-authority'
-import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react'
+import type {
+  ButtonHTMLAttributes,
+  HTMLAttributes,
+  InputHTMLAttributes,
+  LabelHTMLAttributes,
+  ReactNode,
+  TextareaHTMLAttributes,
+} from 'react'
 import { cn } from '../lib/cn'
 
 // ── Button ──────────────────────────────────────────────────────────────────
@@ -77,8 +84,12 @@ export function Dot({ state, className }: { state: string; className?: string })
 }
 
 // ── small layout helpers ──────────────────────────────────────────────────────
-export function Label({ children, className }: { children: ReactNode; className?: string }) {
-  return <label className={cn('block text-xs text-muted-foreground mb-1', className)}>{children}</label>
+export function Label({ children, className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
+  return (
+    <label className={cn('block text-xs text-muted-foreground mb-1', className)} {...props}>
+      {children}
+    </label>
+  )
 }
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="py-10 text-center text-sm text-muted-foreground">{children}</div>

@@ -6,6 +6,8 @@ import { Button, ErrorBanner, Input, Label } from './ui.js'
 import { Logo } from './Logo.js'
 
 export function Login({ onAuthed }: { onAuthed: () => void }) {
+  const endpointId = 'mqlite-broker-url'
+  const tokenId = 'mqlite-login-token'
   const [endpoint, setEp] = useState(getEndpoint())
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
@@ -64,8 +66,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
 
         <div className="mt-6 space-y-4">
           <div>
-            <Label>broker URL</Label>
+            <Label htmlFor={endpointId}>broker URL</Label>
             <Input
+              id={endpointId}
               value={endpoint}
               onChange={(e) => setEp(e.target.value)}
               onBlur={probe}
@@ -75,8 +78,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
             />
           </div>
           <div>
-            <Label>administrator or monitor token</Label>
+            <Label htmlFor={tokenId}>administrator or monitor token</Label>
             <Input
+              id={tokenId}
               type="password"
               autoFocus
               value={token}
