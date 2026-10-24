@@ -1,12 +1,27 @@
-import { formatStamp, useTimeFormat, type TimeMode } from '../lib/time'
+import {
+  formatStamp,
+  useTimeFormat,
+  type RelativeTimeStyle,
+  type TimeMode,
+} from '../lib/time'
 import { cn } from '../lib/cn'
 
 // A timestamp that re-renders with the global format. Hovering always shows the exact ISO.
-export function Time({ ms, className }: { ms?: number; className?: string }) {
+export function Time({
+  ms,
+  className,
+  relativeToMs,
+  relativeStyle,
+}: {
+  ms?: number
+  className?: string
+  relativeToMs?: number | null
+  relativeStyle?: RelativeTimeStyle
+}) {
   const { mode } = useTimeFormat()
   return (
     <span className={className} title={ms ? new Date(ms).toISOString() : undefined}>
-      {formatStamp(ms, mode)}
+      {formatStamp(ms, mode, relativeToMs, relativeStyle)}
     </span>
   )
 }

@@ -1,5 +1,3 @@
-import { formatDateTime, isDisplayableEpochMs } from './date-time.js'
-
 export function fmtNum(n: number): string {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
@@ -23,22 +21,10 @@ function dur(ms: number): string {
   return `${Math.floor(h / 24)}d`
 }
 
-export function ago(ms?: number): string {
+export function ago(ms?: number, referenceMs = Date.now()): string {
   if (!ms) return '—'
-  const d = Date.now() - ms
+  const d = referenceMs - ms
   return d < 0 ? `in ${dur(-d)}` : `${dur(d)} ago`
-}
-
-export function fmtTime(ms?: number): string {
-  if (!ms) return '—'
-  const date = new Date(ms)
-  const formatted = formatDateTime(date)
-  return formatted ? `${formatted}:${String(date.getSeconds()).padStart(2, '0')}` : '—'
-}
-
-export function fmtUTC(ms?: number): string {
-  if (ms === undefined || !isDisplayableEpochMs(ms)) return '—'
-  return new Date(ms).toISOString()
 }
 
 export function fmtMs(ms?: number): string {

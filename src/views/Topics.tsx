@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { subscribe } from '../lib/api.js'
 import { useTopology, type Topic } from '../lib/useTopology.js'
 import type { Metrics, Subscription, SubscriptionPageItem } from '../lib/types.js'
-import { fmtMs, fmtUTC } from '../lib/format.js'
+import { formatStamp, SUBSCRIPTION_EXPIRING_SOON_MS, useTimeFormat } from '../lib/time.js'
 import {
   Badge,
   Button,
@@ -27,8 +27,6 @@ const TTL_UNITS = [
 ]
 
 const MAX_SUBSCRIPTION_TTL_MS = 3650 * 86_400_000
-const EXPIRING_SOON_MS = 24 * 60 * 60 * 1000
-
 type LifecycleInventoryState = 'loading' | 'ready' | 'legacy' | 'error'
 
 export function Topics({ onOpenSub }: { onOpenSub: (topic: string, name: string) => void }) {
@@ -233,6 +231,7 @@ function SubscriptionLifecycle({
   brokerTime?: number
   observationCurrent: boolean
 }) {
+  const { mode } = useTimeFormat()
   let text = inventoryState === 'loading' ? 'lifecycle loading…' : 'lifecycle unavailable'
   let className = 'text-faint'
   let title: string | undefined
@@ -243,22 +242,30 @@ function SubscriptionLifecycle({
       text = deleting ? 'permanent · deleting' : 'permanent'
       className = deleting ? 'text-danger' : 'text-muted-foreground'
     } else {
-      const exact = fmtUTC(expiresAt)
       const remaining = brokerTime === undefined ? undefined : expiresAt - brokerTime
       const expired = remaining !== undefined && remaining <= 0
-      title = fmtUTC(expiresAt)
+      title = new Date(expiresAt).toISOString()
+      const display = formatStamp(expiresAt, mode, brokerTime ?? null, 'remaining')
       if (deleting) {
-        text = expired ? `expired ${exact} · deleting` : `expires ${exact} · deleting`
+        text =
+          mode === 'relative'
+            ? remaining === undefined
+              ? 'remaining unavailable · deleting'
+              : expired
+                ? `expired · ${display} · deleting`
+                : `${display} · deleting`
+            : `${expired ? 'expired' : 'expires'} ${display} · deleting`
         className = 'text-danger'
       } else if (expired) {
-        text = `expired ${exact}`
+        text = mode === 'relative' ? `expired · ${display}` : `expired ${display}`
         className = 'text-danger'
       } else if (remaining === undefined) {
-        text = `expires ${exact} · remaining unavailable`
+        text = mode === 'relative' ? 'remaining unavailable' : `expires ${display}`
         className = 'text-muted-foreground'
       } else {
-        text = `${remaining <= EXPIRING_SOON_MS ? 'expiring soon · ' : ''}expires ${exact} · ${fmtMs(remaining)} left`
-        className = remaining <= EXPIRING_SOON_MS ? 'text-warn' : 'text-muted-foreground'
+        const expiringSoon = remaining <= SUBSCRIPTION_EXPIRING_SOON_MS
+        text = `${expiringSoon ? 'expiring soon · ' : ''}${mode === 'relative' ? display : `expires ${display}`}`
+        className = expiringSoon ? 'text-warn' : 'text-muted-foreground'
       }
       if (!observationCurrent && brokerTime !== undefined) text += ' · stale broker sample'
     }

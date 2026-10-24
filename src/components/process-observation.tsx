@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { compactSnapshot, type MaintenanceDiagnostics } from '../lib/observation.js'
 import { useObservation } from '../lib/observation-context.js'
-import { fmtNum, fmtTime } from '../lib/format.js'
+import { fmtNum } from '../lib/format.js'
+import { Time } from './Time.js'
 import { Card, Stat, StatStrip } from './ui.js'
 
 export function ProcessObservation() {
@@ -50,11 +51,12 @@ export function ProcessObservation() {
   const legacyDiagnostics = s.maintenance.some((task) => task.failures > 0 && !task.diagnostics)
   const filters = s.filters.reduce((n, r) => n + r.count, 0)
   const number = (n: number) => (current ? fmtNum(n) : 'unknown')
+  const brokerTime = s.server_time_ms || null
   return (
     <section className="space-y-3" aria-label="process observations">
       <div className="text-xs text-muted-foreground">
-        Process counters since {fmtTime(s.started_at_ms)}; reset on restart. Event categories can overlap and
-        are not a message ledger.
+        Process counters since <Time ms={s.started_at_ms} relativeToMs={brokerTime} />; reset on restart. Event
+        categories can overlap and are not a message ledger.
         {!current && <span className="text-warn"> Last sample is stale; current values are unknown.</span>}
       </div>
       <StatStrip label="process errors · cumulative">
@@ -122,14 +124,14 @@ export function ProcessObservation() {
                         className={`px-3 py-1.5 ${current && task.diagnostics?.last_outcome === 'failed' ? 'text-danger' : 'text-muted-foreground'}`}
                         title={
                           task.diagnostics?.recovered_at_ms
-                            ? `Recovered at ${fmtTime(task.diagnostics.recovered_at_ms)}`
+                            ? `Recovered at ${new Date(task.diagnostics.recovered_at_ms).toISOString()}`
                             : undefined
                         }
                       >
                         {current ? maintenanceResult(task.diagnostics) : 'unknown · stale'}
                       </td>
                       <td className="px-3 py-1.5 text-muted-foreground">
-                        {fmtTime(task.last_success_at_ms)}
+                        <Time ms={task.last_success_at_ms} relativeToMs={brokerTime} />
                         {!current && ' · stale'}
                       </td>
                     </>
@@ -170,7 +172,7 @@ export function ProcessObservation() {
                           {row.last_error ? (
                             <>
                               <span className="text-foreground">{row.last_error.category}</span> ·{' '}
-                              {fmtTime(row.last_error.at_ms)}
+                              <Time ms={row.last_error.at_ms} relativeToMs={brokerTime} />
                               <div>{row.last_error.message}</div>
                               <div className="text-faint">ref {row.last_error.fingerprint}</div>
                             </>
@@ -225,7 +227,11 @@ export function ProcessObservation() {
                           {failure.task} / {failure.stage}
                         </span>
                         <span className="text-warn">{failure.error.category}</span>
-                        <span className="text-faint">{fmtTime(failure.error.at_ms)}</span>
+                        <Time
+                          ms={failure.error.at_ms}
+                          relativeToMs={brokerTime}
+                          className="text-faint"
+                        />
                       </div>
                       <p className="mt-1 text-muted-foreground">{failure.error.message}</p>
                       <div className="mt-1 break-all text-[11px] text-faint">

@@ -308,6 +308,18 @@ function stat(page: Page, label: string) {
   return page.locator('main').getByText(label, { exact: true }).filter({ visible: true }).locator('..')
 }
 
+function utcStamp(ms: number): string {
+  return new Date(ms).toISOString().replace('T', ' ').replace('.000Z', 'Z')
+}
+
+async function localStamp(page: Page, ms: number): Promise<string> {
+  return page.evaluate((value) => {
+    const date = new Date(value)
+    const pad = (part: number) => String(part).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  }, ms)
+}
+
 test('a pending reload cannot finish the initial managed topology gate', () => {
   expect(managedInitialLoadReady('pending', true, true)).toBe(false)
   expect(managedInitialLoadReady('native', true, false)).toBe(false)
@@ -381,9 +393,26 @@ test('canonical queue, anomaly and process measurements share one request and al
   const broker = await setup(page)
   await page.goto('/')
   const system = page.getByLabel('observation status')
-  await expect(system).toContainText(`broker time (UTC): ${new Date(1800000006000).toISOString()}`)
-  await expect(system).toContainText('queue sample:')
-  await expect(system).toContainText('1s old')
+  await expect(system).toContainText('broker time: 0s ago')
+  await expect(system).toContainText('queue sample: 1s ago')
+  await expect(page.getByLabel('process observations')).toContainText('Process counters since 6s ago')
+  await page.getByRole('button', { name: 'local', exact: true }).click()
+  const localBrokerTime = await page.evaluate((ms) => {
+    const d = new Date(ms)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    )
+  }, 1800000006000)
+  await expect(system).toContainText(`broker time: ${localBrokerTime}`)
+  await page.getByRole('button', { name: 'UTC', exact: true }).click()
+  await expect(system).toContainText('broker time: 2027-01-15 08:00:06Z')
+  await expect(system).toContainText('queue sample: 2027-01-15 08:00:05Z · 1s old')
+  await expect(page.getByLabel('process observations')).toContainText(
+    'Process counters since 2027-01-15 08:00:00Z',
+  )
+  await page.getByRole('button', { name: 'rel', exact: true }).click()
   await expect(stat(page, 'total')).toContainText('19')
   await expect(stat(page, 'active')).toContainText('11')
   await expect(stat(page, 'unexpected states')).toContainText('2')
@@ -402,6 +431,30 @@ test('canonical queue, anomaly and process measurements share one request and al
   await page.getByRole('button', { name: 'metrics', exact: true }).click()
   await expect(stat(page, 'total')).toContainText('19')
   expect(broker.calls.filter((path) => path.endsWith('/Observe'))).toHaveLength(1)
+})
+
+test('queue oldest timestamps use the queue snapshot clock in every display mode', async ({ page }) => {
+  await page.addInitScript(() => {
+    Date.now = () => 1
+  })
+  await setup(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'queues', exact: true }).click()
+
+  const row = page.getByRole('row').filter({ hasText: 'orders' })
+  await expect(row).toContainText('3s ago')
+  const oldestAt = sample().sampled_at_ms - 3000
+
+  await page.getByRole('button', { name: 'local', exact: true }).click()
+  await expect(row).toContainText(await localStamp(page, oldestAt))
+  await page.getByRole('button', { name: 'UTC', exact: true }).click()
+  await expect(row).toContainText(utcStamp(oldestAt))
+
+  await row.click()
+  const subtitle = page.locator('main h1 + p')
+  await expect(subtitle).toContainText(`oldest ${utcStamp(oldestAt)}`)
+  await page.getByRole('button', { name: 'rel', exact: true }).click()
+  await expect(subtitle).toContainText('oldest 3s ago')
 })
 
 test('monitor login, reload and navigation never request administrative or message APIs', async ({
@@ -752,7 +805,7 @@ test('old broker observation shows unavailable broker time without requesting St
   delete old.server_time_ms
   broker.observation = old
   await page.goto('/')
-  await expect(page.getByLabel('observation status')).toContainText('broker time (UTC): unavailable')
+  await expect(page.getByLabel('observation status')).toContainText('broker time: unavailable')
   expect(broker.calls.some((path) => path.endsWith('/Status'))).toBe(false)
 })
 
@@ -762,7 +815,7 @@ test('an explicit zero broker time is displayed as unavailable without requestin
   unavailable.server_time_ms = 0
   broker.observation = unavailable
   await page.goto('/')
-  await expect(page.getByLabel('observation status')).toContainText('broker time (UTC): unavailable')
+  await expect(page.getByLabel('observation status')).toContainText('broker time: unavailable')
   expect(broker.calls.some((path) => path.endsWith('/Status'))).toBe(false)
 })
 
@@ -828,11 +881,18 @@ test('topics group lifecycle rows and use broker time without per-subscription r
   await expect(page.getByText('alpha', { exact: true }).locator('..')).toContainText('2 sub')
   await expect(page.getByText('zulu', { exact: true }).locator('..')).toContainText('1 sub')
   await expect(page.getByLabel('subscription lifecycle durable')).toHaveText('permanent')
-  await expect(page.getByLabel('subscription lifecycle reply')).toContainText('expiring soon')
-  await expect(page.getByLabel('subscription lifecycle reply')).toContainText('30m left')
-  await expect(page.getByLabel('subscription lifecycle reply')).toContainText(new Date(expiringAt).toISOString())
-  await expect(page.getByLabel('subscription lifecycle cleanup')).toContainText('expired')
-  await expect(page.getByLabel('subscription lifecycle cleanup')).toContainText('deleting')
+  const replyLifecycle = page.getByLabel('subscription lifecycle reply')
+  await expect(replyLifecycle).toHaveText('expiring soon · 30m left')
+  await expect(page.getByLabel('subscription lifecycle cleanup')).toHaveText(
+    'expired · 1s ago · deleting',
+  )
+  await page.getByRole('button', { name: 'local', exact: true }).click()
+  await expect(replyLifecycle).toHaveText(`expiring soon · expires ${await localStamp(page, expiringAt)}`)
+  await page.getByRole('button', { name: 'UTC', exact: true }).click()
+  await expect(replyLifecycle).toHaveText(`expiring soon · expires ${utcStamp(expiringAt)}`)
+  await page.getByRole('button', { name: 'rel', exact: true }).click()
+  await expect(replyLifecycle).toHaveText('expiring soon · 30m left')
+  expect(lifecycleRequests).toHaveLength(1)
   const zulu = page.getByText('zulu', { exact: true }).locator('../../..')
   await expect(zulu.getByRole('button', { name: 'publish', exact: true })).toBeDisabled()
   await expect(zulu).toContainText('publishing unavailable · all subscriptions are deleting or expired')
@@ -905,6 +965,7 @@ test('a topic stops offering publish when broker time crosses its last subscript
   broker.observation = expired
   await page.clock.fastForward(5000)
   await expect(publish).toBeDisabled()
+  await expect(page.getByLabel('subscription lifecycle emails')).toHaveText('expired · now')
   await expect(topic).toContainText('publishing unavailable · all subscriptions are deleting or expired')
   await expect(page.getByRole('button', { name: 'publish to events', exact: true })).toHaveCount(0)
   expect(inventoryRequests).toBe(1)
@@ -1254,10 +1315,18 @@ test('subscription detail uses a paged lifecycle row and broker time despite bro
   await page.locator('nav').getByRole('button', { name: 'topics', exact: true }).click()
   await page.getByRole('button', { name: /emails/ }).click()
   const lifecycle = page.getByLabel('subscription lifecycle')
-  await expect(lifecycle).toContainText(new Date(1799996406000).toISOString())
-  await expect(lifecycle).toContainText(new Date(1800007206000).toISOString())
-  await expect(lifecycle).toContainText('remaining at broker time')
-  await expect(lifecycle).toContainText('2h')
+  const created = lifecycle.getByText('created', { exact: true }).locator('..')
+  const expires = lifecycle.getByText('expires', { exact: true }).locator('..')
+  await expect(created).toContainText('1h ago')
+  await expect(expires).toContainText('2h left')
+  await page.getByRole('button', { name: 'local', exact: true }).click()
+  await expect(created).toContainText(await localStamp(page, 1799996406000))
+  await expect(expires).toContainText(await localStamp(page, 1800007206000))
+  await page.getByRole('button', { name: 'UTC', exact: true }).click()
+  await expect(created).toContainText(utcStamp(1799996406000))
+  await expect(expires).toContainText(utcStamp(1800007206000))
+  await page.getByRole('button', { name: 'rel', exact: true }).click()
+  await expect(expires).toContainText('2h left')
   await expect(page.getByText('subject == "receipt"', { exact: true })).toBeVisible()
   expect(requests.filter((request) => request.topic === undefined)).toEqual([
     { limit: 1000, include_deleting: true },

@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
-import { subscriptionRemaining } from '../src/views/Detail.js'
+import { formatStamp } from '../src/lib/time.js'
 
 interface Broker {
   active: boolean
@@ -581,7 +581,6 @@ test('subscription detail shows a permanent lifetime without inventing a browser
   await page.getByRole('button', { name: /emails/ }).click()
   const lifecycle = page.getByLabel('subscription lifecycle')
   await expect(lifecycle).toContainText('permanent · no expiry')
-  await expect(lifecycle.getByText('permanent', { exact: true })).toBeVisible()
 })
 
 test('subscription detail reports a lifecycle row that has expired or been deleted', async ({ page }) => {
@@ -651,12 +650,11 @@ test('subscription detail rejects an undisplayable lifecycle timestamp instead o
   )
 })
 
-test('remaining lifetime is derived only from broker time', () => {
-  expect(subscriptionRemaining(0, 1000)).toBe('permanent')
-  expect(subscriptionRemaining(2000)).toContain('broker time not reported')
-  expect(subscriptionRemaining(2000, 2000)).toBe('expired')
-  expect(subscriptionRemaining(1999, 2000)).toBe('expired')
-  expect(subscriptionRemaining(3_602_000, 2000)).toBe('1h')
+test('remaining timestamp formatting honors an explicit reference clock', () => {
+  expect(formatStamp(2000, 'relative', 1000, 'remaining')).toBe('1s left')
+  expect(formatStamp(2000, 'relative', 2000, 'remaining')).toBe('now')
+  expect(formatStamp(1000, 'relative', 2000, 'remaining')).toBe('1s ago')
+  expect(formatStamp(2000, 'relative', null, 'remaining')).toBe('unavailable')
 })
 
 test('older brokers keep the subscription visible and explain that deletion is unsupported', async ({ page }) => {

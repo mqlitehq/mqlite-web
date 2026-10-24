@@ -71,10 +71,12 @@ The **managed keys** list contains access keys created at runtime. Configured
 administrator tokens in `MQLITE_TOKENS` are managed through broker configuration;
 change the configuration and restart the broker to update or remove them.
 
-Expiry and scheduled delivery use local time in `yyyy-MM-dd HH:mm` format. Their
-calendar controls stay in English regardless of browser language, and listed
-timestamps use `yyyy-MM-dd HH:mm:ss`. Invalid dates are rejected rather than
-silently shifted to a different day or time.
+Expiry and scheduled-delivery inputs use local time in `yyyy-MM-dd HH:mm` format,
+independently of the display mode. Their calendar controls stay in English
+regardless of browser language. Displayed timestamps follow the top-bar
+`rel` / `local` / `UTC` switch; local and UTC values use
+`yyyy-MM-dd HH:mm:ss`, with `Z` marking UTC. Invalid input dates are rejected
+rather than silently shifted to a different day or time.
 
 A public 32-hex ID is generated with browser `crypto.getRandomValues` and retained
 in this tab **before** creation is sent. If storage or randomness is unavailable,
@@ -126,6 +128,11 @@ path for request/reply work; the lifetime is a cleanup backstop when a caller is
 lost or forgets to delete. The console accepts at most 10 years (3,650 fixed
 24-hour days), keeping absolute expiry timestamps practical and exactly
 representable even when broker and client clocks differ slightly.
+
+Subscription lifetime displays derive relative `left` / `ago` values from the
+broker clock reported by `Observe`, not from the browser clock. If that clock is
+unavailable, the console says so instead of inventing a relative value; a stale
+sample stays visibly marked. Absolute local and UTC deadlines remain selectable.
 
 The subscription detail page deletes one exact `topic/name` mapping and requires
 that full pair as confirmation. Deletion is empty-only by default. The force
