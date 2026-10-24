@@ -1,9 +1,12 @@
 import { useObservation } from '../lib/observation-context.js'
-import { fmtBytes, fmtMs, fmtTime, fmtUTC } from '../lib/format.js'
+import { fmtBytes, fmtMs } from '../lib/format.js'
+import { useTimeFormat } from '../lib/time.js'
+import { Time } from './Time.js'
 import { Badge, Card, Dot } from './ui.js'
 
 export function SystemPanel() {
   const { observation: s, current, complete, legacy, canManage, err } = useObservation()
+  const { mode } = useTimeFormat()
   const runtimeAvailable = !s || (s.runtime.read_available && (s.backend !== 'local' || s.runtime.db_size_available))
   const state = !current ? 'unknown' : complete && runtimeAvailable ? 'available' : 'partial'
   const serverTime = s?.server_time_ms
@@ -30,15 +33,18 @@ export function SystemPanel() {
       </div>
       <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          broker time (UTC): {serverTime ? fmtUTC(serverTime) : 'unavailable'}
+          broker time: {serverTime ? <Time ms={serverTime} relativeToMs={serverTime} /> : 'unavailable'}
           {!current && serverTime ? ' · stale' : ''}
         </div>
         <div>
-          queue sample: {s ? fmtTime(s.sampled_at_ms) : 'unknown'}
-          {sampleAge}
+          queue sample: {s ? <Time ms={s.sampled_at_ms} relativeToMs={serverTime || null} /> : 'unknown'}
+          {mode !== 'relative' && sampleAge}
           {!current && s ? ' · stale' : ''}
         </div>
-        <div>last collection success: {s ? fmtTime(s.collection.last_success_at_ms) : 'unknown'}</div>
+        <div>
+          last collection success:{' '}
+          {s ? <Time ms={s.collection.last_success_at_ms} relativeToMs={serverTime || null} /> : 'unknown'}
+        </div>
         <div>process uptime: {s && uptimeAt ? fmtMs(uptimeAt - s.started_at_ms) : 'unknown'}</div>
       </div>
       {s && (

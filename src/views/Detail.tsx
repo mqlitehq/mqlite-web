@@ -31,7 +31,8 @@ import { DLQActions } from '../components/DLQActions.js'
 import { DeferredSettle } from '../components/DeferredSettle.js'
 import { MessageDetail } from '../components/MessageDetail.js'
 import { Time } from '../components/Time.js'
-import { fmtBytes, fmtMs, fmtUTC } from '../lib/format.js'
+import { fmtBytes } from '../lib/format.js'
+import { SUBSCRIPTION_EXPIRING_SOON_MS } from '../lib/time.js'
 
 const TABS: { key: MessageState; label: string }[] = [
   { key: 'active', label: 'active' },
@@ -42,11 +43,25 @@ const TABS: { key: MessageState; label: string }[] = [
 
 type SubscriptionLookup = 'loading' | 'found' | 'missing' | 'legacy' | 'error'
 
-export function subscriptionRemaining(expiresAtMs: number, serverTimeMs?: number): string {
-  if (expiresAtMs === 0) return 'permanent'
-  if (!serverTimeMs) return 'unavailable — broker time not reported'
-  const remaining = expiresAtMs - serverTimeMs
-  return remaining <= 0 ? 'expired' : fmtMs(remaining)
+function SubscriptionExpiryTime({ expiresAtMs, brokerTime }: { expiresAtMs: number; brokerTime?: number }) {
+  if (expiresAtMs === 0) return <>permanent · no expiry</>
+
+  const remaining = brokerTime === undefined ? undefined : expiresAtMs - brokerTime
+  const expired = remaining !== undefined && remaining <= 0
+  const expiringSoon =
+    remaining !== undefined && remaining > 0 && remaining <= SUBSCRIPTION_EXPIRING_SOON_MS
+  const prefix = expired ? 'expired · ' : expiringSoon ? 'expiring soon · ' : ''
+
+  return (
+    <>
+      {prefix}
+      <Time
+        ms={expiresAtMs}
+        relativeToMs={brokerTime ?? null}
+        relativeStyle="remaining"
+      />
+    </>
+  )
 }
 
 export function Detail({
@@ -292,7 +307,10 @@ export function Detail({
                 {m.oldest_message_age_ms > 0 && (
                   <>
                     {' · oldest '}
-                    <Time ms={Date.now() - m.oldest_message_age_ms} />
+                    <Time
+                      ms={(observation?.sampled_at_ms ?? Date.now()) - m.oldest_message_age_ms}
+                      relativeToMs={observation?.sampled_at_ms}
+                    />
                   </>
                 )}
               </span>
@@ -384,35 +402,28 @@ export function Detail({
           {subscriptionLookup === 'loading' ? (
             <p className="mt-2 text-xs text-faint">loading…</p>
           ) : subscriptionLookup === 'found' && subscriptionInfo ? (
-            <dl className="mt-2 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-              <div>
-                <dt className="text-faint">created (UTC)</dt>
-                <dd className="mt-0.5 break-all tabular-nums text-foreground/80">
-                  <time dateTime={fmtUTC(subscriptionInfo.created_at_ms)}>
-                    {fmtUTC(subscriptionInfo.created_at_ms)}
-                  </time>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-faint">expires (UTC)</dt>
-                <dd className="mt-0.5 break-all tabular-nums text-foreground/80">
-                  {subscriptionInfo.expires_at_ms === 0 ? (
-                    'permanent · no expiry'
-                  ) : (
-                    <time dateTime={fmtUTC(subscriptionInfo.expires_at_ms)}>
-                      {fmtUTC(subscriptionInfo.expires_at_ms)}
-                    </time>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-faint">remaining at broker time</dt>
-                <dd className="mt-0.5 text-foreground/80">
-                  {subscriptionRemaining(subscriptionInfo.expires_at_ms, brokerTime)}
-                  {!observationCurrent && brokerTime ? ' · stale broker sample' : ''}
-                </dd>
-              </div>
-            </dl>
+            <>
+              <dl className="mt-2 grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                <div>
+                  <dt className="text-faint">created</dt>
+                  <dd className="mt-0.5 break-all tabular-nums text-foreground/80">
+                    <Time ms={subscriptionInfo.created_at_ms} relativeToMs={brokerTime ?? null} />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-faint">expires</dt>
+                  <dd className="mt-0.5 break-all tabular-nums text-foreground/80">
+                    <SubscriptionExpiryTime
+                      expiresAtMs={subscriptionInfo.expires_at_ms}
+                      brokerTime={brokerTime}
+                    />
+                  </dd>
+                </div>
+              </dl>
+              {!observationCurrent && brokerTime && (
+                <p className="mt-2 text-[11px] text-warn">Lifecycle state uses a stale broker sample.</p>
+              )}
+            </>
           ) : subscriptionLookup === 'legacy' ? (
             <p className="mt-2 text-xs text-faint">
               This broker does not expose subscription lifecycle timestamps.

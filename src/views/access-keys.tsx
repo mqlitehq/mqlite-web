@@ -9,10 +9,10 @@ import {
   type PendingKeyCreation,
 } from '../lib/access-keys.js'
 import type { AccessKey, CreateKeyResult, KeyPage } from '../lib/types.js'
-import { fmtTime } from '../lib/format.js'
 import { parseDateTime } from '../lib/date-time.js'
 import { DateTimeField } from '../components/date-time-field.js'
 import { PermissionSelect } from '../components/permission-select.js'
+import { Time } from '../components/Time.js'
 import { Badge, Button, Card, Empty, ErrorBanner, Input, PageHeader, Spinner } from '../components/ui.js'
 
 function errorMessage(error: unknown): string {
@@ -440,9 +440,21 @@ export function AccessKeys() {
                           </Badge>
                         </td>
                         <td className="px-3 py-3 text-faint">
-                          <div>{fmtTime(key.created_at_ms)}</div>
-                          <div>{key.expires_at_ms ? fmtTime(key.expires_at_ms) : 'no expiry'}</div>
-                          {!!key.revoked_at_ms && <div>revoked {fmtTime(key.revoked_at_ms)}</div>}
+                          <div>
+                            <Time ms={key.created_at_ms} relativeToMs={now} />
+                          </div>
+                          <div>
+                            {key.expires_at_ms ? (
+                              <Time ms={key.expires_at_ms} relativeToMs={now} />
+                            ) : (
+                              'no expiry'
+                            )}
+                          </div>
+                          {!!key.revoked_at_ms && (
+                            <div>
+                              revoked <Time ms={key.revoked_at_ms} relativeToMs={now} />
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <Button

@@ -599,7 +599,8 @@ for (const locale of ['zh-CN', 'en-US']) {
   test.describe(`English dates with browser locale ${locale}`, () => {
     test.use({ locale, timezoneId: 'Asia/Shanghai' })
 
-    test('keeps input, calendar, and key timestamps in a fixed format', async ({ page }) => {
+    test('keeps local inputs fixed while key timestamps follow the global mode', async ({ page }) => {
+      await page.clock.install({ time: new Date(Date.UTC(2027, 0, 1)) })
       const broker = await setup(page, [{
         ...validListKey,
         name: 'formatted-key',
@@ -609,8 +610,15 @@ for (const locale of ['zh-CN', 'en-US']) {
       await expect(page.getByRole('heading', { name: 'managed keys', exact: true })).toBeVisible()
       await expect(page.getByText(/Administrator tokens in MQLITE_TOKENS are not listed here/)).toContainText('restart the broker')
       const row = page.getByRole('row').filter({ hasText: 'formatted-key' })
+      await expect(row).toContainText('ago')
+      await expect(row).toContainText('in ')
+      await page.getByRole('button', { name: 'local', exact: true }).click()
       await expect(row).toContainText('2026-09-20 09:02:03')
       await expect(row).toContainText('2099-01-02 11:04:05')
+      await page.getByRole('button', { name: 'UTC', exact: true }).click()
+      await expect(row).toContainText('2026-09-20 01:02:03Z')
+      await expect(row).toContainText('2099-01-02 03:04:05Z')
+      await page.getByRole('button', { name: 'local', exact: true }).click()
       const expiry = page.getByRole('textbox', { name: 'key expiry', exact: true })
       await expect(expiry).toHaveAttribute('placeholder', 'yyyy-MM-dd HH:mm')
       await expiry.fill('2096-02-29 14:05')

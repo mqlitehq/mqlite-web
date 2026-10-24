@@ -46,7 +46,7 @@ function DurField({
 }
 
 export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
-  const { queues, metrics, loading, err, reload } = useTopology()
+  const { observation, queues, metrics, loading, err, reload } = useTopology()
   const [creating, setCreating] = useState(false)
 
   return (
@@ -130,7 +130,10 @@ export function Queues({ onOpen }: { onOpen: (name: string) => void }) {
                       {!m ? (
                         'unknown'
                       ) : m.oldest_message_age_ms ? (
-                        <Time ms={Date.now() - m.oldest_message_age_ms} />
+                        <Time
+                          ms={(observation?.sampled_at_ms ?? Date.now()) - m.oldest_message_age_ms}
+                          relativeToMs={observation?.sampled_at_ms}
+                        />
                       ) : (
                         '—'
                       )}
