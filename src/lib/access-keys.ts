@@ -1,4 +1,4 @@
-import { getEndpoint } from './auth.js'
+import { brokerBaseURL } from './broker-target.js'
 
 // Only public correlation metadata belongs in storage. Secrets stay in memory.
 export interface PendingKeyCreation {
@@ -15,7 +15,7 @@ export function generateKeyID(): string {
 }
 
 export function pendingKeyStorageSlot(): string {
-  const endpoint = getEndpoint() || (import.meta.env.VITE_MQLITE_URL as string | undefined) || window.location.origin
+  const endpoint = brokerBaseURL() || window.location.origin
   return `mqlite_pending_key:${endpoint}`
 }
 

@@ -3,8 +3,10 @@ import { discovery } from '../lib/api.js'
 import type { Discovery } from '../lib/types.js'
 import { useObservation } from '../lib/observation-context.js'
 import { cn } from '../lib/cn.js'
+import { currentBrokerTarget } from '../lib/broker-target.js'
 import { Logo } from './Logo.js'
 import { TimeFormatToggle } from './Time.js'
+import { Badge } from './ui.js'
 import { Overview } from '../views/Overview.js'
 import { Queues } from '../views/Queues.js'
 import { Topics } from '../views/Topics.js'
@@ -40,6 +42,8 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
   const [view, setView] = useState<View>('overview')
   const [detail, setDetail] = useState<DetailTarget | null>(null)
   const [info, setInfo] = useState<Discovery | null>(null)
+  const brokerTarget = currentBrokerTarget()
+  const connectionLabel = `broker connection: ${brokerTarget.kind} ${brokerTarget.display}`
 
   useEffect(() => {
     discovery().then(setInfo)
@@ -73,14 +77,22 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
               </NavItem>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-2 sm:gap-4">
             <TimeFormatToggle />
             <div
-              className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"
-              title={current ? (healthy ? 'sample available' : 'partial observation') : 'availability unknown'}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+              aria-label={connectionLabel}
+              title={`${connectionLabel} · ${current ? (healthy ? 'sample available' : 'partial observation') : 'availability unknown'}`}
             >
               <span className={`inline-block h-1.5 w-1.5 rounded-full ${healthy ? 'bg-ok' : 'bg-warn'}`} />
-              <span className="text-faint">
+              <Badge
+                tone={brokerTarget.kind === 'remote' ? 'info' : brokerTarget.kind === 'custom' ? 'warn' : 'neutral'}
+                className="h-4 px-1.5 text-[10px]"
+              >
+                {brokerTarget.kind}
+              </Badge>
+              <span className="hidden max-w-48 truncate text-faint lg:inline">{brokerTarget.display}</span>
+              <span className="hidden text-faint sm:inline">
                 {info?.name ?? 'broker'}
                 {info?.version ? ` ${info.version}` : ''}
               </span>

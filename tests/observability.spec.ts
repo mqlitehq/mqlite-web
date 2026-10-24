@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { compactSnapshot, isObservation, type Observation } from '../src/lib/observation.js'
 import { managedInitialLoadReady } from '../src/lib/observation-context.js'
+import { describeBrokerTarget, selectBrokerBaseURL } from '../src/lib/broker-target.js'
 
 function sample(access: Observation['access'] = 'manage'): Observation {
   const snapshot: Observation = {
@@ -326,6 +327,41 @@ test('a pending reload cannot finish the initial managed topology gate', () => {
   expect(managedInitialLoadReady('native', true, true)).toBe(true)
 })
 
+test('broker target labels follow browser origins without exposing endpoint secrets', () => {
+  const pageOrigin = 'https://console.example.test'
+  expect(selectBrokerBaseURL('https://stored.example', 'https://built.example')).toBe(
+    'https://stored.example',
+  )
+  expect(selectBrokerBaseURL('', 'https://built.example')).toBe('https://built.example')
+  expect(selectBrokerBaseURL('')).toBe('')
+  expect(describeBrokerTarget('', pageOrigin)).toEqual({ kind: 'same-origin', display: pageOrigin })
+  expect(describeBrokerTarget('/broker', pageOrigin)).toEqual({ kind: 'same-origin', display: pageOrigin })
+  expect(describeBrokerTarget('https://console.example.test:443/path', pageOrigin)).toEqual({
+    kind: 'same-origin',
+    display: pageOrigin,
+  })
+
+  const remote = describeBrokerTarget(
+    'https://alice:secret@broker.example.test:8443/private?token=hidden#fragment',
+    pageOrigin,
+  )
+  expect(remote).toEqual({ kind: 'remote', display: 'https://broker.example.test:8443' })
+  expect(JSON.stringify(remote)).not.toMatch(/alice|secret|private|hidden|fragment/)
+  expect(describeBrokerTarget('http://console.example.test', pageOrigin).kind).toBe('remote')
+  expect(describeBrokerTarget('http://[::1]:6754', 'http://[::1]:5173')).toEqual({
+    kind: 'remote',
+    display: 'http://[::1]:6754',
+  })
+  expect(describeBrokerTarget('http://[invalid', pageOrigin)).toEqual({
+    kind: 'custom',
+    display: 'custom endpoint',
+  })
+  expect(describeBrokerTarget('data:text/plain,secret', pageOrigin)).toEqual({
+    kind: 'custom',
+    display: 'custom endpoint',
+  })
+})
+
 for (const topologyResult of ['success', 'failure'] as const) {
   test(`initial manage view waits for delayed topology ${topologyResult}`, async ({ page }) => {
     const broker = await setup(page)
@@ -393,6 +429,10 @@ test('canonical queue, anomaly and process measurements share one request and al
   const broker = await setup(page)
   await page.goto('/')
   const system = page.getByLabel('observation status')
+  const connection = page.getByLabel('broker connection: remote https://observe.example.test')
+  await expect(connection).toBeVisible()
+  await expect(connection).toContainText('remote')
+  await expect(connection).toContainText('https://observe.example.test')
   await expect(system).toContainText('broker time: 0s ago')
   await expect(system).toContainText('queue sample: 1s ago')
   await expect(page.getByLabel('process observations')).toContainText('Process counters since 6s ago')
@@ -893,6 +933,7 @@ test('topics group lifecycle rows and use broker time without per-subscription r
   await page.getByRole('button', { name: 'rel', exact: true }).click()
   await expect(replyLifecycle).toHaveText('expiring soon · 30m left')
   expect(lifecycleRequests).toHaveLength(1)
+  await expect(page.getByLabel('broker connection: remote https://observe.example.test')).toBeVisible()
   const zulu = page.getByText('zulu', { exact: true }).locator('../../..')
   await expect(zulu.getByRole('button', { name: 'publish', exact: true })).toBeDisabled()
   await expect(zulu).toContainText('publishing unavailable · all subscriptions are deleting or expired')
