@@ -63,8 +63,8 @@ brokers show an upgrade message; existing message and entity tools still work.
 | Permission      | Intended use                                                      |
 | --------------- | ----------------------------------------------------------------- |
 | `send`          | Publish, schedule, and cancel scheduled messages                  |
-| `listen`        | Browse, receive, settle, and renew messages                       |
-| `send + listen` | Processors that consume and publish                               |
+| `listen`        | Consume messages and create or update subscriptions               |
+| `send + listen` | Processors that publish, consume, and provision subscriptions     |
 | `manage`        | All operations, including issuing and revoking administrator keys |
 
 Create a named key with optional expiry, then save the one-time secret in a secret
@@ -124,14 +124,15 @@ operation as unsupported.
 
 ## Subscription deletion
 
-The create form can set an optional fixed lifetime. The broker stores one
+Creating or updating a subscription requires `listen`; listing and deleting
+subscriptions requires `manage`. The create form can set an optional fixed lifetime. The broker stores one
 absolute deadline from the first successful creation; publishing, receiving,
 filter edits, and ordinary retries never extend it. At the deadline the
 subscription becomes unavailable and expiry is treated as prior authorization
 to discard any retained messages during bounded cleanup. Leave the field blank
-for a permanent subscription. Explicit deletion remains the normal completion
-path for request/reply work; the lifetime is a cleanup backstop when a caller is
-lost or forgets to delete. The console accepts at most 10 years (3,650 fixed
+for a permanent subscription. A manager performs explicit early deletion; a
+listen-only temporary client should always set a lifetime as its cleanup path.
+The console accepts at most 10 years (3,650 fixed
 24-hour days), keeping absolute expiry timestamps practical and exactly
 representable even when broker and client clocks differ slightly.
 
