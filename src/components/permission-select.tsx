@@ -4,8 +4,8 @@ import { cn } from '../lib/cn.js'
 
 const permissions = [
   { value: 'send', label: 'send', description: 'Publish, schedule, and cancel messages.' },
-  { value: 'listen', label: 'listen', description: 'Consume, settle, and inspect messages.' },
-  { value: 'send,listen', label: 'send + listen', description: 'Publish and consume messages.' },
+  { value: 'listen', label: 'listen', description: 'Consume messages and create or update subscriptions.' },
+  { value: 'send,listen', label: 'send + listen', description: 'Publish, consume, and provision subscriptions.' },
   { value: 'manage', label: 'manage', description: 'Full administration, including issuing and revoking keys.' },
 ]
 

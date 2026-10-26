@@ -220,6 +220,8 @@ test('permission menu has a dark surface, fits mobile, and dismisses uncommitted
   for (const label of Object.values(permissionLabels)) {
     await expect(list.getByRole('option', { name: label, exact: true })).toBeVisible()
   }
+  await expect(list.getByText('Consume messages and create or update subscriptions.', { exact: true })).toBeVisible()
+  await expect(list.getByText('Publish, consume, and provision subscriptions.', { exact: true })).toBeVisible()
   const surface = await list.evaluate((node) => {
     const canvas = document.createElement('canvas')
     canvas.width = canvas.height = 1

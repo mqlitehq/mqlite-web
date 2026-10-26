@@ -20,9 +20,10 @@ export function Docs({ onOpenKeys }: { onOpenKeys: () => void }) {
         <h2 className="text-sm font-semibold">access keys</h2>
         <p className="text-xs leading-relaxed text-muted-foreground">
           Use a configured administrator token or a managed key with manage permission for administration. Configured
-          monitor tokens open read-only overview and metrics views. Create separate send keys for producers, listen keys
-          for consumers, or send + listen keys for processors. Manage includes both and can issue and revoke other
-          administrator keys. Permissions apply to the entire broker.
+          monitor tokens open read-only overview and metrics views. Send keys publish. Listen keys consume and can create
+          or update broker-wide subscriptions and test filters; listing or deleting subscriptions still requires manage.
+          Manage includes send and listen and can issue or revoke other administrator keys. Permissions apply to the
+          entire broker. Give listen-only temporary subscriptions a fixed TTL; a manager performs any early retirement.
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           New secrets use mqk_ followed by 64 random lowercase hexadecimal characters (256 bits). Copy the secret once
